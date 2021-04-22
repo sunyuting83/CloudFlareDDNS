@@ -65,6 +65,11 @@ func main() {
 		ipAddr     string
 		recordType string = "A"
 	)
+	if len(os.Args) >= 6 {
+		if os.Args[5] == "true" {
+			proxy = true
+		}
+	}
 	ipAddr = GetIpAddr()
 	ip, a := ParseIP(ipAddr)
 	if ip != nil {
