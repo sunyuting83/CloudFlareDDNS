@@ -144,7 +144,9 @@ func GetIpAddr() (i string) {
 
 // getData get data
 func getData(url string, types string, data []byte, password string) (s []byte, err error) {
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: time.Duration(15 * time.Second),
+	}
 	reqest, err := http.NewRequest(types, url, bytes.NewBuffer(data))
 
 	if len(password) > 0 {
