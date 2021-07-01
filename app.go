@@ -181,7 +181,10 @@ func CloudFlareApi(url string, types string, password string, data []byte, getIP
 	}
 	if p.Success {
 		if getIP {
-			return p.Result[0].ID, p.Result[0].Content, p.Success
+			if len(p.Result) > 0 {
+				return p.Result[0].ID, p.Result[0].Content, p.Success
+			}
+			return "", "", p.Success
 		}
 		return "", "", p.Success
 	}
