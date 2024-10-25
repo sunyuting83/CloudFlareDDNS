@@ -185,15 +185,9 @@ func GetIpAddr() (i string) {
 		command := strings.Join([]string{"ip -4 addr show dev", config.InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
 		ip, err := RunCommandWithRes(command)
 		if err != nil || len(ip) == 0 {
-			ip, err := getData("https://www.taobao.com/help/getip.php", "GET", []byte(""), "")
+			ip, err := getData("4.ipw.cn", "GET", []byte(""), "")
 			if err == nil {
-				ips := string(ip)
-				length := len(ips)
-				start := strings.Index(ips, `ip:"`)
-				a := ips[start+4 : length]
-				end := strings.Index(a, `"}`)
-				i = a[0:end]
-				return
+				i = string(ip)
 			}
 		}
 		if strings.Contains(i, "\n") {
