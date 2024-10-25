@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -55,39 +57,88 @@ type PostData struct {
 	Proxied bool   `json:"proxied"`
 }
 
+type Config struct {
+	CFApi      string
+	Proxy      bool
+	ZoneID     string
+	Token      string
+	HostName   string
+	InterFace  string
+	Types      bool
+	IPAddr     string
+	RecordType string
+}
+
+var config *Config
+
 func main() {
 	var (
-		CFApi      string = "https://api.cloudflare.com/client/v4/zones/"
 		proxy      bool   = false
-		username   string = os.Args[1]
-		password   string = os.Args[2]
+		zoneid     string = os.Args[1]
+		token      string = os.Args[2]
 		hostname   string = os.Args[3]
-		ipAddr     string
+		interFace  string = os.Args[4]
+		ifv4       bool   = false
 		recordType string = "A"
 	)
-	if len(os.Args) >= 6 {
-		if os.Args[5] == "true" {
+	if len(os.Args) >= 7 {
+		if len(os.Args[1]) != 32 {
+			fmt.Println("zoneid is error")
+			return
+		}
+		if len(os.Args[2]) != 40 {
+			fmt.Println("token is error")
+			return
+		}
+		if len(os.Args[3]) <= 5 {
+			fmt.Println("hostname is error")
+			return
+		}
+		if len(os.Args[4]) <= 1 {
+			fmt.Println("interface is error")
+			return
+		}
+		if os.Args[5] == "4" {
+			ifv4 = true
+		} else {
+			ifv4 = false
+			recordType = "AAAA"
+		}
+		if os.Args[6] == "true" {
 			proxy = true
 		}
+	} else {
+		fmt.Println("params is not supported")
+		return
 	}
-	ipAddr = GetIpAddr()
+	config = &Config{
+		CFApi:      "https://api.cloudflare.com/client/v4/zones/",
+		ZoneID:     zoneid,
+		Token:      token,
+		HostName:   hostname,
+		Types:      ifv4,
+		InterFace:  interFace,
+		RecordType: recordType,
+	}
+	ipAddr := GetIpAddr()
 	ip, a := ParseIP(ipAddr)
 	if ip != nil {
 		if a != 4 {
 			recordType = "AAAA"
 		}
 	}
-	var CurrentUrl string = strings.Join([]string{CFApi, username, "/dns_records?type=", recordType, "&name=", hostname}, "")
-	recordId, recordIp, resSuccess := CloudFlareApi(CurrentUrl, "GET", password, []byte(""), true)
+	var CurrentUrl string = strings.Join([]string{config.CFApi, config.ZoneID, "/dns_records?type=", config.RecordType, "&name=", config.HostName}, "")
+	recordId, recordIp, resSuccess := CloudFlareApi(CurrentUrl, "GET", config.Token, []byte(""), true)
 	if resSuccess {
+		// fmt.Println(recordIp, ipAddr)
 		if recordIp == ipAddr {
 			fmt.Println("nochg")
 			return
 		}
-		data := MakePostData(proxy, ipAddr, hostname, recordType)
+		data := MakePostData(proxy, ipAddr, config.HostName, config.RecordType)
 		if recordId == "null" {
-			var createDnsApi string = strings.Join([]string{CFApi, username, "/dns_records"}, "")
-			_, _, success := CloudFlareApi(createDnsApi, "POST", password, data, false)
+			var createDnsApi string = strings.Join([]string{config.CFApi, config.ZoneID, "/dns_records"}, "")
+			_, _, success := CloudFlareApi(createDnsApi, "POST", config.Token, data, false)
 			if success {
 				fmt.Println("good")
 				return
@@ -96,8 +147,8 @@ func main() {
 				return
 			}
 		} else {
-			var updateDnsApi string = strings.Join([]string{CFApi, username, "/dns_records/", recordId}, "")
-			_, _, success := CloudFlareApi(updateDnsApi, "PUT", password, data, false)
+			var updateDnsApi string = strings.Join([]string{config.CFApi, config.ZoneID, "/dns_records/", recordId}, "")
+			_, _, success := CloudFlareApi(updateDnsApi, "PUT", config.Token, data, false)
 			if success {
 				fmt.Println("good")
 				return
@@ -130,14 +181,38 @@ func ParseIP(s string) (net.IP, int) {
 
 // GetIpAddr get ip addr
 func GetIpAddr() (i string) {
-	ip, err := getData("https://www.taobao.com/help/getip.php", "GET", []byte(""), "")
-	if err == nil {
-		ips := string(ip)
-		length := len(ips)
-		start := strings.Index(ips, `ip:"`)
-		a := ips[start+4 : length]
-		end := strings.Index(a, `"}`)
-		i = a[0:end]
+	if config.Types {
+		command := strings.Join([]string{"ip -4 addr show dev", config.InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
+		ip, err := RunCommandWithRes(command)
+		if err != nil || len(ip) == 0 {
+			ip, err := getData("https://www.taobao.com/help/getip.php", "GET", []byte(""), "")
+			if err == nil {
+				ips := string(ip)
+				length := len(ips)
+				start := strings.Index(ips, `ip:"`)
+				a := ips[start+4 : length]
+				end := strings.Index(a, `"}`)
+				i = a[0:end]
+				return
+			}
+		}
+		if strings.Contains(i, "\n") {
+			i = strings.Split(i, "\n")[0]
+			return
+		}
+		i = ip
+		return
+	}
+	command := strings.Join([]string{"ip -6 addr show dev", config.InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
+	i, err := RunCommandWithRes(command)
+	if err != nil || len(i) == 0 {
+		ip, err := getData("https://6.ipw.cn/", "GET", []byte(""), "")
+		if err == nil {
+			i = string(ip)
+		}
+	}
+	if strings.Contains(i, "\n") {
+		i = strings.Split(i, "\n")[0]
 	}
 	return
 }
@@ -161,7 +236,7 @@ func getData(url string, types string, data []byte, password string) (s []byte, 
 		return []byte(""), err
 	}
 	defer response.Body.Close()
-	d, err := ioutil.ReadAll(response.Body)
+	d, err := io.ReadAll(response.Body)
 	if err != nil {
 		return []byte(""), err
 	}
@@ -202,4 +277,43 @@ func MakePostData(proxy bool, ipAddr string, hostname string, recordType string)
 	}
 	b, _ := json.Marshal(d)
 	return b
+}
+
+func RunCommandWithRes(cmdExec string) (k string, err error) {
+	cmd := exec.Command("/bin/sh", "-c", cmdExec)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	defer stdout.Close()
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+	defer stderr.Close()
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	bytesErr, err := io.ReadAll(stderr)
+	if err != nil {
+		return "", err
+	}
+
+	if len(bytesErr) != 0 {
+		return "", errors.New("0")
+
+	}
+
+	bytes, err := io.ReadAll(stdout)
+	if err != nil {
+		return "", err
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return "", err
+	}
+	return string(bytes), nil
 }

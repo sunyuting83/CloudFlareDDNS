@@ -9,3 +9,8 @@
 GO跨平台编译，任何平台都可以食用。
 
 [食用指南](https://github.com/joshuaavalon/SynologyCloudflareDDNS)直接看大神的说明吧。懒得写了。
+
+参数说明：
+|  1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- |--- |--- |
+|  zoneid | token | hostname | 网卡名 | ipv4 or ipv6 | proxy |
