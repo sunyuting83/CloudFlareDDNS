@@ -297,6 +297,38 @@ func CheckConfig(ConfigFile string) (conf *Config, err error) {
 	return confYaml, nil
 }
 
+func CronTask(ScanTime int, confYaml *Config) (chan bool, chan string) {
+	task := func() {
+		fmt.Println(confYaml)
+	}
+
+	ticker := time.NewTicker(time.Duration(ScanTime) * time.Second)
+
+	stopChan := make(chan bool)
+	statusChan := make(chan string) // 新增状态通道
+
+	go func(ticker *time.Ticker) {
+		defer ticker.Stop()
+		statusChan <- "running" // 任务开始时发送状态
+
+		for {
+			select {
+			case <-ticker.C:
+				if strings.Contains(confYaml.Domains, ".") && len(confYaml.Token) >= 30 && len(confYaml.ZoneID) >= 30 {
+					task()
+				}
+			case stop := <-stopChan:
+				if stop {
+					statusChan <- "stopped" // 任务停止时发送状态
+					return
+				}
+			}
+		}
+	}(ticker)
+
+	return stopChan, statusChan // 返回状态通道
+}
+
 func FilterURL(url string) string {
 	// 替换 http:// 和 https://
 	url = strings.ReplaceAll(url, "http://", "")
@@ -317,6 +349,19 @@ func main() {
 		time.Sleep(10 * time.Second)
 		os.Exit(1)
 	}
+
+	ch, statusChan := CronTask(1, confYaml)
+	var status string
+	go func() {
+		for {
+			select {
+			case status = <-statusChan:
+				fmt.Println("CronTask status:", status)
+			default:
+				time.Sleep(100 * time.Millisecond) // 暂停 100 毫秒
+			}
+		}
+	}()
 
 	router := gin.Default()
 
@@ -364,6 +409,7 @@ func main() {
 			"InterFacesList": interfacesList,
 			"Domains":        confYaml.Domains,
 			"InterFace":      confYaml.InterFace,
+			"TaskStatus":     status,
 		})
 	})
 
@@ -434,6 +480,10 @@ func main() {
 			})
 			return
 		}
+		if status == "stopped" {
+			ch <- false
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"status":  200,
 			"message": "Save config file",
