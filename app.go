@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,6 +76,8 @@ type Config struct {
 	IP6Addr   string
 	AdminPWD  string
 	Domains   string
+	ScanTime  int
+	HasError  bool
 }
 
 type FormConfig struct {
@@ -84,59 +87,61 @@ type FormConfig struct {
 	Proxy      string `form:"Proxy" json:"Proxy" xml:"Proxy"  binding:"required"`
 	Interfaces string `form:"Interfaces" json:"Interfaces" xml:"Interfaces"  binding:"required"`
 	Domains    string `form:"Domains" json:"Domains" xml:"Domains"  binding:"required"`
+	ScanTime   string `form:"ScanTime" json:"ScanTime" xml:"ScanTime"  binding:"required"`
 }
 
 type FormPassword struct {
 	Password string `form:"Password" json:"Password" xml:"Password"  binding:"required"`
 }
 
-// ParseIP Parse IP Type
-func ParseIP(s string) (net.IP, int) {
-	ip := net.ParseIP(s)
-	if ip == nil {
-		return nil, 0
-	}
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '.':
-			return ip, 4
-		case ':':
-			return ip, 6
-		}
-	}
-	return nil, 0
+type IPList struct {
+	IPAddr  string
+	IP6Addr string
+}
+
+var CfStatus string = "nothing"
+var CacheUrl string
+
+func FilterString(input string) string {
+	// 使用 ReplaceAll 方法过滤掉 \r、\n 和 \t
+	input = strings.ReplaceAll(input, "\r", "")
+	input = strings.ReplaceAll(input, "\n", "")
+	input = strings.ReplaceAll(input, "\t", "")
+	return input
 }
 
 // GetIpAddr get ip addr
-func GetIpAddr() (i string) {
-	var config *Config
-	if config.Types == 0 {
-		command := strings.Join([]string{"ip -4 addr show dev", config.InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
-		ip, err := RunCommandWithRes(command)
-		if err != nil || len(ip) == 0 {
-			ip, err := getData("4.ipw.cn", "GET", []byte(""), "")
-			if err == nil {
-				i = string(ip)
-			}
-		}
-		if strings.Contains(i, "\n") {
-			i = strings.Split(i, "\n")[0]
-			return
-		}
-		i = ip
-		return
-	}
-	command := strings.Join([]string{"ip -6 addr show dev", config.InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
-	i, err := RunCommandWithRes(command)
-	if err != nil || len(i) == 0 {
-		ip, err := getData("https://6.ipw.cn/", "GET", []byte(""), "")
+func GetIpAddr(InterFace string) (ip_list *IPList) {
+	var (
+		ipv4 string
+		ipv6 string
+	)
+	command := strings.Join([]string{"ip -4 addr show dev", InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
+	ip, err := RunCommandWithRes(command)
+	if err != nil || len(ip) == 0 {
+		ipData, err := getData("4.ipw.cn", "GET", []byte(""), "")
 		if err == nil {
-			i = string(ip)
+			ipv4 = string(ipData)
+		}
+	} else {
+		ipv4 = FilterString(ip)
+	}
+
+	v6command := strings.Join([]string{"ip -6 addr show dev", InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
+	v6ip, err := RunCommandWithRes(v6command)
+	if err != nil || len(v6ip) == 0 {
+		ip6Data, err := getData("https://6.ipw.cn/", "GET", []byte(""), "")
+		if err == nil {
+			ipv6 = string(ip6Data)
+		}
+	} else {
+		if strings.Contains(v6ip, "\n") {
+			ipv6 = strings.Split(v6ip, "\n")[0]
+		} else {
+			ipv6 = v6ip
 		}
 	}
-	if strings.Contains(i, "\n") {
-		i = strings.Split(i, "\n")[0]
-	}
+	ip_list = &IPList{IPAddr: ipv4, IP6Addr: ipv6}
 	return
 }
 
@@ -160,6 +165,7 @@ func getData(url string, types string, data []byte, password string) (s []byte, 
 	}
 	defer response.Body.Close()
 	d, err := io.ReadAll(response.Body)
+	// fmt.Println(string(d))
 	if err != nil {
 		return []byte(""), err
 	}
@@ -170,6 +176,7 @@ func getData(url string, types string, data []byte, password string) (s []byte, 
 func CloudFlareApi(url string, types string, password string, data []byte, getIP bool) (recordIp string, recordId string, resSuccess bool) {
 	d, err := getData(url, types, data, password)
 	if err != nil {
+		// fmt.Println(err)
 		return "", "", false
 	}
 	var p *Success
@@ -191,8 +198,7 @@ func CloudFlareApi(url string, types string, password string, data []byte, getIP
 
 // MakePostData Make post data
 func MakePostData(proxy bool, ipAddr string, hostname string, recordType string) (bd []byte) {
-	var d *PostData
-	d = &PostData{
+	d := &PostData{
 		Type:    recordType,
 		Name:    hostname,
 		Content: ipAddr,
@@ -265,12 +271,14 @@ func CheckConfig(ConfigFile string) (conf *Config, err error) {
 				IPAddr:    "",
 				IP6Addr:   "",
 				AdminPWD:  "1234567890",
+				ScanTime:  30,
+				HasError:  false,
 			}
 
 			// 将默认配置写入新文件
 			file, err := os.Create(ConfigFile)
 			if err != nil {
-				return confYaml, errors.New("Error creating config file\nThe program will close in 10 seconds")
+				return confYaml, errors.New("error creating config file\nthe program will close in 10 seconds")
 			}
 			defer file.Close()
 
@@ -280,7 +288,7 @@ func CheckConfig(ConfigFile string) (conf *Config, err error) {
 	} else {
 		err = yaml.Unmarshal(yamlFile, &confYaml)
 		if err != nil {
-			return confYaml, errors.New("Error read config file\nThe program will close in 10 seconds")
+			return confYaml, errors.New("error read config file\nthe program will close in 10 seconds")
 		}
 		if len(confYaml.CFApi) <= 0 {
 			confYaml.CFApi = "https://api.cloudflare.com/client/v4/zones/"
@@ -292,20 +300,153 @@ func CheckConfig(ConfigFile string) (conf *Config, err error) {
 			config, _ := yaml.Marshal(&confYaml)
 			os.WriteFile(ConfigFile, config, 0644)
 		}
+		if confYaml.ScanTime <= 0 {
+			confYaml.ScanTime = 30
+			config, _ := yaml.Marshal(&confYaml)
+			os.WriteFile(ConfigFile, config, 0644)
+		}
 		return confYaml, nil
 	}
 	return confYaml, nil
 }
 
-func CronTask(ScanTime int, confYaml *Config) (chan bool, chan string) {
-	task := func() {
-		fmt.Println(confYaml)
+func CloudFlareFunc(ipData *IPList, CfRootUrl, CheckUrl, ConfigFile string, config *Config, RecordType string) {
+	// fmt.Println(CheckUrl)
+	recordId, recordIp, resSuccess := CloudFlareApi(CheckUrl, "GET", config.Token, []byte(""), true)
+	// fmt.Println(config.IP6Addr, config.IPAddr, config.Domains, recordIp, resSuccess, config.HasError)
+	if resSuccess && len(recordId) != 0 {
+		// fmt.Println(recordId, recordIp, resSuccess)
+		// fmt.Println(recordIp, ipAddr)
+		var DataIP string = ipData.IPAddr
+
+		if RecordType == "A" {
+			if config.IPAddr != "" {
+				if recordIp == ipData.IPAddr {
+					CfStatus = "IPv4 No need to update"
+					if CacheUrl == config.Domains {
+						return
+					}
+				}
+			}
+		}
+		if RecordType == "AAAA" {
+			DataIP = ipData.IP6Addr
+			if config.IP6Addr != "" {
+				if recordIp == ipData.IP6Addr {
+					CfStatus = "IPv6 No need to update"
+					if CacheUrl == config.Domains {
+						return
+					}
+				}
+			}
+		}
+		data := MakePostData(config.Proxy, DataIP, config.Domains, RecordType)
+		if recordId == "null" {
+			_, _, success := CloudFlareApi(CfRootUrl, "POST", config.Token, data, true)
+			// fmt.Println(recordIp)
+			if success {
+				if RecordType == "A" {
+					config.IPAddr = ipData.IPAddr
+				} else {
+					config.IP6Addr = ipData.IP6Addr
+				}
+
+				configData, _ := yaml.Marshal(&config)
+				err := os.WriteFile(ConfigFile, configData, 0644)
+				if err != nil {
+					CfStatus = "Save config file failed for Create"
+					return
+				}
+				CfStatus = "Created successfully"
+				CacheUrl = config.Domains
+				return
+			} else {
+				CfStatus = "Authentication failed for Create"
+				return
+			}
+		} else {
+			var updateDnsApi string = strings.Join([]string{CfRootUrl, "/", recordId}, "")
+			// fmt.Println(updateDnsApi)
+			_, _, success := CloudFlareApi(updateDnsApi, "PUT", config.Token, data, false)
+			if success {
+				if RecordType == "A" {
+					config.IPAddr = ipData.IPAddr
+				} else {
+					config.IP6Addr = ipData.IP6Addr
+				}
+				configData, _ := yaml.Marshal(&config)
+				err := os.WriteFile(ConfigFile, configData, 0644)
+				// fmt.Println(recordIp, success, "up", config)
+				if err != nil {
+					CfStatus = "Save config file failed for Update"
+					return
+				}
+				CfStatus = "Update completed"
+				CacheUrl = config.Domains
+				return
+			} else {
+				CfStatus = "Authentication failed for Update"
+				return
+			}
+		}
+	} else {
+		config.HasError = true
+
+		configData, _ := yaml.Marshal(&config)
+		err := os.WriteFile(ConfigFile, configData, 0644)
+		if err != nil {
+			CfStatus = "Save config file failed for HasError"
+			return
+		}
 	}
+}
+
+func CronTask(ScanTime int, confYaml *Config, ConfigFile string) (chan bool, chan string) {
 
 	ticker := time.NewTicker(time.Duration(ScanTime) * time.Second)
 
 	stopChan := make(chan bool)
 	statusChan := make(chan string) // 新增状态通道
+
+	task := func() {
+		if CacheUrl != confYaml.Domains {
+			confYaml.IPAddr = ""
+			confYaml.IP6Addr = ""
+		}
+		var CfRootUrl string = strings.Join([]string{confYaml.CFApi, confYaml.ZoneID, "/dns_records"}, "")
+		var CheckUrl string = strings.Join([]string{CfRootUrl, "?name=", confYaml.Domains, "&type="}, "")
+		ipData := GetIpAddr(confYaml.InterFace)
+		// fmt.Println(ipData)
+		switch confYaml.Types {
+		case 0:
+			if confYaml.IPAddr != ipData.IPAddr {
+				v4url := strings.Join([]string{CheckUrl, "A"}, "")
+				CloudFlareFunc(ipData, CfRootUrl, v4url, ConfigFile, confYaml, "A")
+			} else {
+				CfStatus = "IPv4 No need to update"
+			}
+
+		case 1:
+			if confYaml.IP6Addr != ipData.IP6Addr {
+				v6url := strings.Join([]string{CheckUrl, "AAAA"}, "")
+				CloudFlareFunc(ipData, CfRootUrl, v6url, ConfigFile, confYaml, "AAAA")
+			} else {
+				CfStatus = "IPv6 No need to update"
+			}
+		case 2:
+			if confYaml.IPAddr != ipData.IPAddr {
+				v4url := strings.Join([]string{CheckUrl, "A"}, "")
+				CloudFlareFunc(ipData, CfRootUrl, v4url, ConfigFile, confYaml, "A")
+			}
+			if confYaml.IP6Addr != ipData.IP6Addr {
+				v6url := strings.Join([]string{CheckUrl, "AAAA"}, "")
+				CloudFlareFunc(ipData, CfRootUrl, v6url, ConfigFile, confYaml, "AAAA")
+			} else {
+				CfStatus = "IPv4 And IPv6 No need to update"
+			}
+
+		}
+	}
 
 	go func(ticker *time.Ticker) {
 		defer ticker.Stop()
@@ -314,7 +455,7 @@ func CronTask(ScanTime int, confYaml *Config) (chan bool, chan string) {
 		for {
 			select {
 			case <-ticker.C:
-				if strings.Contains(confYaml.Domains, ".") && len(confYaml.Token) >= 30 && len(confYaml.ZoneID) >= 30 {
+				if strings.Contains(confYaml.Domains, ".") && len(confYaml.Token) >= 30 && len(confYaml.ZoneID) >= 30 && !confYaml.HasError {
 					task()
 				}
 			case stop := <-stopChan:
@@ -349,16 +490,17 @@ func main() {
 		time.Sleep(10 * time.Second)
 		os.Exit(1)
 	}
-
-	ch, statusChan := CronTask(1, confYaml)
+	CacheUrl = confYaml.Domains
+	// fmt.Println(CacheUrl)
 	var status string
+	ch, statusChan := CronTask(1, confYaml, ConfigFile)
 	go func() {
 		for {
 			select {
 			case status = <-statusChan:
 				fmt.Println("CronTask status:", status)
 			default:
-				time.Sleep(100 * time.Millisecond) // 暂停 100 毫秒
+				time.Sleep(3000 * time.Millisecond) // 暂停 100 毫秒
 			}
 		}
 	}()
@@ -410,6 +552,9 @@ func main() {
 			"Domains":        confYaml.Domains,
 			"InterFace":      confYaml.InterFace,
 			"TaskStatus":     status,
+			"ApiStatus":      CfStatus,
+			"HasError":       confYaml.HasError,
+			"ScanTime":       confYaml.ScanTime,
 		})
 	})
 
@@ -465,14 +610,23 @@ func main() {
 		default:
 			Proxy = false
 		}
+		ScanTime, err := strconv.Atoi(form.ScanTime)
+		if err != nil {
+			ScanTime = 30
+		}
 		confYaml.Domains = Domains
 		confYaml.ZoneID = form.ZoneID
 		confYaml.Token = form.Token
 		confYaml.Types = Types
 		confYaml.Proxy = Proxy
 		confYaml.InterFace = form.Interfaces
+		confYaml.ScanTime = ScanTime
+		if confYaml.HasError {
+			confYaml.HasError = false
+		}
+		// fmt.Println(confYaml.HasError)
 		config, _ := yaml.Marshal(&confYaml)
-		err := os.WriteFile(ConfigFile, config, 0644)
+		err = os.WriteFile(ConfigFile, config, 0644)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"status":  500,
@@ -480,6 +634,7 @@ func main() {
 			})
 			return
 		}
+		// fmt.Println(status)
 		if status == "stopped" {
 			ch <- false
 		}
