@@ -10,8 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"gopkg.in/yaml.v2"
 )
 
 type Success struct {
@@ -66,100 +70,9 @@ type Config struct {
 	InterFace  string
 	Types      bool
 	IPAddr     string
+	IP6Addr    string
 	RecordType string
-}
-
-var config *Config
-
-func main() {
-	var (
-		proxy      bool   = false
-		zoneid     string = os.Args[1]
-		token      string = os.Args[2]
-		hostname   string = os.Args[3]
-		interFace  string = os.Args[4]
-		ifv4       bool   = false
-		recordType string = "A"
-	)
-	if len(os.Args) >= 7 {
-		if len(os.Args[1]) != 32 {
-			fmt.Println("zoneid is error")
-			return
-		}
-		if len(os.Args[2]) != 40 {
-			fmt.Println("token is error")
-			return
-		}
-		if len(os.Args[3]) <= 5 {
-			fmt.Println("hostname is error")
-			return
-		}
-		if len(os.Args[4]) <= 1 {
-			fmt.Println("interface is error")
-			return
-		}
-		if os.Args[5] == "4" {
-			ifv4 = true
-		} else {
-			ifv4 = false
-			recordType = "AAAA"
-		}
-		if os.Args[6] == "true" {
-			proxy = true
-		}
-	} else {
-		fmt.Println("params is not supported")
-		return
-	}
-	config = &Config{
-		CFApi:      "https://api.cloudflare.com/client/v4/zones/",
-		ZoneID:     zoneid,
-		Token:      token,
-		HostName:   hostname,
-		Types:      ifv4,
-		InterFace:  interFace,
-		RecordType: recordType,
-	}
-	ipAddr := GetIpAddr()
-	ip, a := ParseIP(ipAddr)
-	if ip != nil {
-		if a != 4 {
-			recordType = "AAAA"
-		}
-	}
-	var CurrentUrl string = strings.Join([]string{config.CFApi, config.ZoneID, "/dns_records?type=", config.RecordType, "&name=", config.HostName}, "")
-	recordId, recordIp, resSuccess := CloudFlareApi(CurrentUrl, "GET", config.Token, []byte(""), true)
-	if resSuccess {
-		// fmt.Println(recordIp, ipAddr)
-		if recordIp == ipAddr {
-			fmt.Println("nochg")
-			return
-		}
-		data := MakePostData(proxy, ipAddr, config.HostName, config.RecordType)
-		if recordId == "null" {
-			var createDnsApi string = strings.Join([]string{config.CFApi, config.ZoneID, "/dns_records"}, "")
-			_, _, success := CloudFlareApi(createDnsApi, "POST", config.Token, data, false)
-			if success {
-				fmt.Println("good")
-				return
-			} else {
-				fmt.Println("badauth")
-				return
-			}
-		} else {
-			var updateDnsApi string = strings.Join([]string{config.CFApi, config.ZoneID, "/dns_records/", recordId}, "")
-			_, _, success := CloudFlareApi(updateDnsApi, "PUT", config.Token, data, false)
-			if success {
-				fmt.Println("good")
-				return
-			} else {
-				fmt.Println("badauth")
-				return
-			}
-		}
-	}
-	fmt.Println("badauth")
-	return
+	AdminPWD   string
 }
 
 // ParseIP Parse IP Type
@@ -181,6 +94,7 @@ func ParseIP(s string) (net.IP, int) {
 
 // GetIpAddr get ip addr
 func GetIpAddr() (i string) {
+	var config *Config
 	if config.Types {
 		command := strings.Join([]string{"ip -4 addr show dev", config.InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
 		ip, err := RunCommandWithRes(command)
@@ -310,4 +224,106 @@ func RunCommandWithRes(cmdExec string) (k string, err error) {
 		return "", err
 	}
 	return string(bytes), nil
+}
+
+func GetCurrentPath() (string, error) {
+	path, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(path)
+	return dir, nil
+}
+
+func CheckConfig(CurrentPath string) (conf *Config, err error) {
+	ConfigFile := strings.Join([]string{CurrentPath, "config.yaml"}, "/")
+
+	var confYaml *Config
+	yamlFile, err := os.ReadFile(ConfigFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			confYaml = &Config{
+				CFApi:      "https://api.cloudflare.com/client/v4/zones/",
+				Proxy:      false,
+				ZoneID:     "",
+				Token:      "",
+				HostName:   "",
+				InterFace:  "",
+				IPAddr:     "",
+				IP6Addr:    "",
+				RecordType: "A",
+				AdminPWD:   "1234567890",
+			}
+
+			// 将默认配置写入新文件
+			file, err := os.Create(ConfigFile)
+			if err != nil {
+				return confYaml, errors.New("Error creating config file\nThe program will close in 10 seconds")
+			}
+			defer file.Close()
+
+			config, _ := yaml.Marshal(&confYaml)
+			os.WriteFile(ConfigFile, config, 0644)
+		}
+	} else {
+		err = yaml.Unmarshal(yamlFile, &confYaml)
+		if err != nil {
+			return confYaml, errors.New("Error read config file\nThe program will close in 10 seconds")
+		}
+		if len(confYaml.CFApi) <= 0 {
+			confYaml.CFApi = "https://api.cloudflare.com/client/v4/zones/"
+			config, _ := yaml.Marshal(&confYaml)
+			os.WriteFile(ConfigFile, config, 0644)
+		}
+		if len(confYaml.AdminPWD) <= 0 {
+			confYaml.AdminPWD = "1234567890"
+			config, _ := yaml.Marshal(&confYaml)
+			os.WriteFile(ConfigFile, config, 0644)
+		}
+		return confYaml, nil
+	}
+	return confYaml, nil
+}
+
+func main() {
+	CurrentPath, _ := GetCurrentPath()
+	confYaml, err := CheckConfig(CurrentPath)
+	if err != nil {
+		fmt.Println(err)
+		time.Sleep(10 * time.Second)
+		os.Exit(1)
+	}
+
+	// 获取所有网络接口
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	// 遍历所有接口并打印名称
+	for _, iface := range interfaces {
+		// 只打印启用的接口
+		if iface.Flags&net.FlagUp != 0 {
+			fmt.Println("Interface Name:", iface.Name)
+		}
+	}
+	// fmt.Println(confYaml)
+	router := gin.Default()
+	// 定义用户凭据
+	accounts := gin.Accounts{
+		"admin": confYaml.AdminPWD,
+	}
+	router.Use(gin.BasicAuth(accounts))
+
+	router.GET("/", func(c *gin.Context) {
+		user := c.MustGet(gin.AuthUserKey).(string)
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Welcome to the admin dashboard!",
+			"user":    user,
+		})
+	})
+
+	// 启动服务器
+	router.Run(":3060")
 }
