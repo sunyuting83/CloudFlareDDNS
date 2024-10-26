@@ -2,14 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -62,17 +65,29 @@ type PostData struct {
 }
 
 type Config struct {
-	CFApi      string
-	Proxy      bool
-	ZoneID     string
-	Token      string
-	HostName   string
-	InterFace  string
-	Types      bool
-	IPAddr     string
-	IP6Addr    string
-	RecordType string
-	AdminPWD   string
+	CFApi     string
+	Proxy     bool
+	ZoneID    string
+	Token     string
+	InterFace string
+	Types     int
+	IPAddr    string
+	IP6Addr   string
+	AdminPWD  string
+	Domains   string
+}
+
+type FormConfig struct {
+	ZoneID     string `form:"ZoneID" json:"ZoneID" xml:"ZoneID"  binding:"required"`
+	Token      string `form:"Token" json:"Token" xml:"Token"  binding:"required"`
+	Type       string `form:"Type" json:"Type" xml:"Type"  binding:"required"`
+	Proxy      string `form:"Proxy" json:"Proxy" xml:"Proxy"  binding:"required"`
+	Interfaces string `form:"Interfaces" json:"Interfaces" xml:"Interfaces"  binding:"required"`
+	Domains    string `form:"Domains" json:"Domains" xml:"Domains"  binding:"required"`
+}
+
+type FormPassword struct {
+	Password string `form:"Password" json:"Password" xml:"Password"  binding:"required"`
 }
 
 // ParseIP Parse IP Type
@@ -95,7 +110,7 @@ func ParseIP(s string) (net.IP, int) {
 // GetIpAddr get ip addr
 func GetIpAddr() (i string) {
 	var config *Config
-	if config.Types {
+	if config.Types == 0 {
 		command := strings.Join([]string{"ip -4 addr show dev", config.InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
 		ip, err := RunCommandWithRes(command)
 		if err != nil || len(ip) == 0 {
@@ -235,24 +250,21 @@ func GetCurrentPath() (string, error) {
 	return dir, nil
 }
 
-func CheckConfig(CurrentPath string) (conf *Config, err error) {
-	ConfigFile := strings.Join([]string{CurrentPath, "config.yaml"}, "/")
+func CheckConfig(ConfigFile string) (conf *Config, err error) {
 
 	var confYaml *Config
 	yamlFile, err := os.ReadFile(ConfigFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			confYaml = &Config{
-				CFApi:      "https://api.cloudflare.com/client/v4/zones/",
-				Proxy:      false,
-				ZoneID:     "",
-				Token:      "",
-				HostName:   "",
-				InterFace:  "",
-				IPAddr:     "",
-				IP6Addr:    "",
-				RecordType: "A",
-				AdminPWD:   "1234567890",
+				CFApi:     "https://api.cloudflare.com/client/v4/zones/",
+				Proxy:     false,
+				ZoneID:    "",
+				Token:     "",
+				InterFace: "",
+				IPAddr:    "",
+				IP6Addr:   "",
+				AdminPWD:  "1234567890",
 			}
 
 			// 将默认配置写入新文件
@@ -285,32 +297,29 @@ func CheckConfig(CurrentPath string) (conf *Config, err error) {
 	return confYaml, nil
 }
 
+func FilterURL(url string) string {
+	// 替换 http:// 和 https://
+	url = strings.ReplaceAll(url, "http://", "")
+	url = strings.ReplaceAll(url, "https://", "")
+
+	// 移除所有的 /
+	url = strings.ReplaceAll(url, "/", "")
+
+	return url
+}
+
 func main() {
 	CurrentPath, _ := GetCurrentPath()
-	confYaml, err := CheckConfig(CurrentPath)
+	ConfigFile := strings.Join([]string{CurrentPath, "config.yaml"}, "/")
+	confYaml, err := CheckConfig(ConfigFile)
 	if err != nil {
 		fmt.Println(err)
 		time.Sleep(10 * time.Second)
 		os.Exit(1)
 	}
 
-	// 获取所有网络接口
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-
-	// 遍历所有接口并打印名称
-	for _, iface := range interfaces {
-		// 只打印启用的接口
-		if iface.Flags&net.FlagUp != 0 {
-			fmt.Println("Interface Name:", iface.Name)
-		}
-	}
-	// fmt.Println(confYaml)
 	router := gin.Default()
-	// 定义用户凭据
+
 	accounts := gin.Accounts{
 		"admin": confYaml.AdminPWD,
 	}
@@ -318,12 +327,172 @@ func main() {
 
 	router.GET("/", func(c *gin.Context) {
 		user := c.MustGet(gin.AuthUserKey).(string)
+		password := accounts["admin"]
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Welcome to the admin dashboard!",
 			"user":    user,
+			"passwod": password,
 		})
 	})
 
-	// 启动服务器
-	router.Run(":3060")
+	router.GET("/api/status", func(c *gin.Context) {
+		var interfacesList []string
+		interfaces, err := net.Interfaces()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  500,
+				"message": err.Error(),
+			})
+			return
+		}
+
+		for _, iface := range interfaces {
+			if iface.Flags&net.FlagUp != 0 {
+				interfacesList = append(interfacesList, iface.Name)
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":         200,
+			"message":        "success",
+			"ZoneID":         confYaml.ZoneID,
+			"Token":          confYaml.Token,
+			"IPv4":           confYaml.IPAddr,
+			"IPv6":           confYaml.IP6Addr,
+			"Type":           confYaml.Types,
+			"Proxy":          confYaml.Proxy,
+			"InterFacesList": interfacesList,
+			"Domains":        confYaml.Domains,
+			"InterFace":      confYaml.InterFace,
+		})
+	})
+
+	router.PUT("/api/setconfig", func(c *gin.Context) {
+		var form FormConfig
+		if err := c.ShouldBind(&form); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  1,
+				"message": err.Error(),
+			})
+			return
+		}
+		if len(form.ZoneID) < 30 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  1,
+				"message": "Invalid ZoneID",
+			})
+			return
+		}
+		if len(form.Token) < 30 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  1,
+				"message": "Invalid Token",
+			})
+			return
+		}
+		if !strings.Contains(form.Domains, ".") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  1,
+				"message": "Invalid Domains",
+			})
+			return
+		}
+		Domains := FilterURL(form.Domains)
+
+		var Types int
+		switch form.Type {
+		case "0":
+			Types = 0
+		case "1":
+			Types = 1
+		case "2":
+			Types = 2
+		default:
+			Types = 0
+		}
+		var Proxy bool
+		switch form.Proxy {
+		case "true":
+			Proxy = true
+		case "false":
+			Proxy = false
+		default:
+			Proxy = false
+		}
+		confYaml.Domains = Domains
+		confYaml.ZoneID = form.ZoneID
+		confYaml.Token = form.Token
+		confYaml.Types = Types
+		confYaml.Proxy = Proxy
+		confYaml.InterFace = form.Interfaces
+		config, _ := yaml.Marshal(&confYaml)
+		err := os.WriteFile(ConfigFile, config, 0644)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status":  500,
+				"message": "Error writing config file",
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  200,
+			"message": "Save config file",
+		})
+	})
+
+	router.PUT("/api/setpassword", func(c *gin.Context) {
+		var form FormPassword
+		if err := c.ShouldBind(&form); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  1,
+				"message": err.Error(),
+			})
+			return
+		}
+		if len(form.Password) < 8 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  1,
+				"message": "Password must be at least 8 characters",
+			})
+			return
+		}
+		confYaml.AdminPWD = form.Password
+		config, _ := yaml.Marshal(&confYaml)
+		err := os.WriteFile(ConfigFile, config, 0644)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status":  500,
+				"message": "Error writing config file",
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  200,
+			"message": "Changed Password",
+		})
+	})
+
+	srv := &http.Server{
+		Addr:    ":3060",
+		Handler: router,
+	}
+	fmt.Printf("listen port %s\n", srv.Addr)
+	go func() {
+		// 服务连接
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
+	log.Println("Shutdown Server ...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server Shutdown:", err)
+	}
+	log.Println("Server exiting")
 }
