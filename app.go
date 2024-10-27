@@ -510,16 +510,22 @@ func main() {
 	accounts := gin.Accounts{
 		"admin": confYaml.AdminPWD,
 	}
+
 	router.Use(gin.BasicAuth(accounts))
+	router.Delims("{%", "%}")
+
+	router.StaticFS("/static", http.Dir("static"))
+	router.LoadHTMLGlob("static/index.html")
 
 	router.GET("/", func(c *gin.Context) {
-		user := c.MustGet(gin.AuthUserKey).(string)
-		password := accounts["admin"]
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Welcome to the admin dashboard!",
-			"user":    user,
-			"passwod": password,
-		})
+		// user := c.MustGet(gin.AuthUserKey).(string)
+		// password := accounts["admin"]
+		// c.JSON(http.StatusOK, gin.H{
+		// 	"message": "Welcome to the admin dashboard!",
+		// 	"user":    user,
+		// 	"passwod": password,
+		// })
+		c.HTML(http.StatusOK, "index.html", nil)
 	})
 
 	router.GET("/api/status", func(c *gin.Context) {
