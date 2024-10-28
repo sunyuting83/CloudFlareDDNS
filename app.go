@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v2"
 )
@@ -511,6 +512,7 @@ func main() {
 		"admin": confYaml.AdminPWD,
 	}
 
+	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(gin.BasicAuth(accounts))
 	router.Delims("{%", "%}")
 
@@ -518,13 +520,6 @@ func main() {
 	router.LoadHTMLGlob("static/index.html")
 
 	router.GET("/", func(c *gin.Context) {
-		// user := c.MustGet(gin.AuthUserKey).(string)
-		// password := accounts["admin"]
-		// c.JSON(http.StatusOK, gin.H{
-		// 	"message": "Welcome to the admin dashboard!",
-		// 	"user":    user,
-		// 	"passwod": password,
-		// })
 		c.HTML(http.StatusOK, "index.html", nil)
 	})
 
