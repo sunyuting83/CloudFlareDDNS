@@ -484,6 +484,7 @@ func FilterURL(url string) string {
 
 func main() {
 	CurrentPath, _ := GetCurrentPath()
+	fmt.Println(CurrentPath)
 	ConfigFile := strings.Join([]string{CurrentPath, "config.yaml"}, "/")
 	confYaml, err := CheckConfig(ConfigFile)
 	if err != nil {
@@ -505,8 +506,8 @@ func main() {
 			}
 		}
 	}()
-
-	router := gin.Default()
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
 
 	accounts := gin.Accounts{
 		"admin": confYaml.AdminPWD,
@@ -516,8 +517,11 @@ func main() {
 	router.Use(gin.BasicAuth(accounts))
 	router.Delims("{%", "%}")
 
-	router.StaticFS("/static", http.Dir("static"))
-	router.LoadHTMLGlob("static/index.html")
+	staticPath := filepath.Join(CurrentPath, "static")
+	router.StaticFS("/static", http.Dir(staticPath))
+
+	templatesPath := filepath.Join(CurrentPath, "static", "*.html")
+	router.LoadHTMLGlob(templatesPath)
 
 	router.GET("/", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "index.html", nil)
