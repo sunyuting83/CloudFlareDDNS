@@ -29,6 +29,18 @@
       line-height: 38px;
     }
     .red {color:brown}
+    .container {padding-bottom: 60px;}
+    .dark {
+      background: #000000;
+      color:#eee
+    }
+    .dark .u-full-width {
+      color: #000
+    }
+    .dark button[disabled] {
+      background: #eee;
+      color: #000
+    }
   </style>
 </head>
 
@@ -109,6 +121,7 @@
       pow_message: "",
       mounted() {
         console.log(`I'm mounted!`)
+        window.bodyClass = 'dark'
         this.GetStatusData()
       },
       async putData(){

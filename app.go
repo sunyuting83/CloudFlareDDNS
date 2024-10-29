@@ -174,27 +174,27 @@ func getData(url string, types string, data []byte, password string) (s []byte, 
 }
 
 // CloudFlareApi Cloud Flare Api
-func CloudFlareApi(url string, types string, password string, data []byte, getIP bool) (recordIp string, recordId string, resSuccess bool) {
+func CloudFlareApi(url string, types string, password string, data []byte, getIP bool) (recordIp string, recordId string, resSuccess bool, err error) {
 	d, err := getData(url, types, data, password)
 	if err != nil {
 		// fmt.Println(err)
-		return "", "", false
+		return "", "", false, err
 	}
 	var p *Success
 	//3.json解析到结构体
 	if err := json.Unmarshal(d, &p); err != nil {
-		return "", "", p.Success
+		return "", "", p.Success, nil
 	}
 	if p.Success {
 		if getIP {
 			if len(p.Result) > 0 {
-				return p.Result[0].ID, p.Result[0].Content, p.Success
+				return p.Result[0].ID, p.Result[0].Content, p.Success, nil
 			}
-			return "", "", p.Success
+			return "", "", p.Success, nil
 		}
-		return "", "", p.Success
+		return "", "", p.Success, nil
 	}
-	return "", "", p.Success
+	return "", "", p.Success, nil
 }
 
 // MakePostData Make post data
@@ -313,8 +313,11 @@ func CheckConfig(ConfigFile string) (conf *Config, err error) {
 
 func CloudFlareFunc(ipData *IPList, CfRootUrl, CheckUrl, ConfigFile string, config *Config, RecordType string) {
 	// fmt.Println(CheckUrl)
-	recordId, recordIp, resSuccess := CloudFlareApi(CheckUrl, "GET", config.Token, []byte(""), true)
-	// fmt.Println(config.IP6Addr, config.IPAddr, config.Domains, recordIp, resSuccess, config.HasError)
+	recordId, recordIp, resSuccess, err := CloudFlareApi(CheckUrl, "GET", config.Token, []byte(""), true)
+	fmt.Println(config.IP6Addr, config.IPAddr, config.Domains, recordIp, resSuccess, config.HasError, err)
+	if err != nil {
+		return
+	}
 	if resSuccess && len(recordId) != 0 {
 		// fmt.Println(recordId, recordIp, resSuccess)
 		// fmt.Println(recordIp, ipAddr)
@@ -343,8 +346,10 @@ func CloudFlareFunc(ipData *IPList, CfRootUrl, CheckUrl, ConfigFile string, conf
 		}
 		data := MakePostData(config.Proxy, DataIP, config.Domains, RecordType)
 		if recordId == "null" {
-			_, _, success := CloudFlareApi(CfRootUrl, "POST", config.Token, data, true)
-			// fmt.Println(recordIp)
+			_, _, success, err := CloudFlareApi(CfRootUrl, "POST", config.Token, data, true)
+			if err != nil {
+				return
+			}
 			if success {
 				if RecordType == "A" {
 					config.IPAddr = ipData.IPAddr
@@ -368,7 +373,10 @@ func CloudFlareFunc(ipData *IPList, CfRootUrl, CheckUrl, ConfigFile string, conf
 		} else {
 			var updateDnsApi string = strings.Join([]string{CfRootUrl, "/", recordId}, "")
 			// fmt.Println(updateDnsApi)
-			_, _, success := CloudFlareApi(updateDnsApi, "PUT", config.Token, data, false)
+			_, _, success, err := CloudFlareApi(updateDnsApi, "PUT", config.Token, data, false)
+			if err != nil {
+				return
+			}
 			if success {
 				if RecordType == "A" {
 					config.IPAddr = ipData.IPAddr
@@ -403,7 +411,7 @@ func CloudFlareFunc(ipData *IPList, CfRootUrl, CheckUrl, ConfigFile string, conf
 }
 
 func CronTask(ScanTime int, confYaml *Config, ConfigFile string) (chan bool, chan string) {
-
+	// fmt.Println(ScanTime)
 	ticker := time.NewTicker(time.Duration(ScanTime) * time.Second)
 
 	stopChan := make(chan bool)
@@ -417,7 +425,7 @@ func CronTask(ScanTime int, confYaml *Config, ConfigFile string) (chan bool, cha
 		var CfRootUrl string = strings.Join([]string{confYaml.CFApi, confYaml.ZoneID, "/dns_records"}, "")
 		var CheckUrl string = strings.Join([]string{CfRootUrl, "?name=", confYaml.Domains, "&type="}, "")
 		ipData := GetIpAddr(confYaml.InterFace)
-		// fmt.Println(ipData)
+		// fmt.Println(ipData, time.Now())
 		switch confYaml.Types {
 		case 0:
 			if confYaml.IPAddr != ipData.IPAddr {
@@ -484,7 +492,7 @@ func FilterURL(url string) string {
 
 func main() {
 	CurrentPath, _ := GetCurrentPath()
-	fmt.Println(CurrentPath)
+	// fmt.Println(CurrentPath)
 	ConfigFile := strings.Join([]string{CurrentPath, "config.yaml"}, "/")
 	confYaml, err := CheckConfig(ConfigFile)
 	if err != nil {
@@ -493,20 +501,22 @@ func main() {
 		os.Exit(1)
 	}
 	CacheUrl = confYaml.Domains
+
 	// fmt.Println(CacheUrl)
 	var status string
-	ch, statusChan := CronTask(1, confYaml, ConfigFile)
+	ch, statusChan := CronTask(confYaml.ScanTime, confYaml, ConfigFile)
 	go func() {
 		for {
 			select {
 			case status = <-statusChan:
 				fmt.Println("CronTask status:", status)
 			default:
-				time.Sleep(3000 * time.Millisecond) // 暂停 100 毫秒
+				time.Sleep(10 * time.Second) // 暂停 100 毫秒
 			}
 		}
 	}()
-	gin.SetMode(gin.ReleaseMode)
+	// gin.SetMode(gin.ReleaseMode)
+	gin.SetMode(gin.DebugMode)
 	router := gin.New()
 
 	accounts := gin.Accounts{
