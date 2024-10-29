@@ -415,7 +415,7 @@ func CronTask(ScanTime int, confYaml *Config, ConfigFile string) (chan bool, cha
 	ticker := time.NewTicker(time.Duration(ScanTime) * time.Second)
 
 	stopChan := make(chan bool)
-	statusChan := make(chan string) // 新增状态通道
+	statusChan := make(chan string)
 
 	task := func() {
 		if CacheUrl != confYaml.Domains {

@@ -41,6 +41,10 @@
       background: #eee;
       color: #000
     }
+    .close {
+      margin-left: 2rem;
+      cursor: pointer;
+    }
   </style>
 </head>
 
@@ -119,9 +123,12 @@
       passowrd: "",
       set_message: "",
       pow_message: "",
+      dark: true,
       mounted() {
         console.log(`I'm mounted!`)
-        window.bodyClass = 'dark'
+        if (this.dark) {
+          document.getElementsByTagName("body")[0].className="dark"
+        }
         this.GetStatusData()
       },
       async putData(){
@@ -165,7 +172,15 @@
       },
       upStatus(){
         this.GetStatusData()
-      }
+      },
+      light(){
+        this.dark = !this.dark
+        if (this.dark) {
+          document.getElementsByTagName("body")[0].className="dark"
+        }else{
+          document.getElementsByTagName("body")[0].className=""
+        }
+      },
     }
   }
   createApp({
@@ -177,7 +192,7 @@
 <body>
   <div class="container" v-scope="Counter()" @vue:mounted="mounted">
     <div class="section docs-section" v-if="loading">
-      <h6 class="docs-header">接口设置</h6>
+      <h6 class="docs-header"><span>接口设置</span><span class="close" @click="light">{{dark? "开灯" : "关灯"}}</span></h6>
       <p class="red" v-if="set_message.length > 0">{{set_message}}</p>
       <div class="row">
         <div class="four columns">
