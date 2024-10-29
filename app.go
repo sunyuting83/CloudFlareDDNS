@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +80,7 @@ type Config struct {
 	Domains   string
 	ScanTime  int
 	HasError  bool
+	SocatList []ProcessInfo
 }
 
 type FormConfig struct {
@@ -100,8 +102,93 @@ type IPList struct {
 	IP6Addr string
 }
 
+type ProcessInfo struct {
+	Name     string `json:"Name"`
+	PID      string `json:"PID"`
+	Type     string `json:"Type"`
+	Port     string `json:"Port"`
+	ForkIP   string `json:"ForkIP"`
+	ForkPort string `json:"ForkPort"`
+	ForkType string `json:"ForkType"`
+}
+
 var CfStatus string = "nothing"
 var CacheUrl string
+
+func GetSocatList(input string) []ProcessInfo {
+	var processes []ProcessInfo
+	if len(input) > 0 {
+		// 使用正则表达式匹配每一行
+		lines := strings.Split(input, "\n")
+		for _, line := range lines {
+			if line == "" {
+				continue
+			}
+
+			// 使用正则表达式提取信息
+			re := regexp.MustCompile(`(?P<pid>\d+)\s+\w+\s+\d+\s+\w+\s+(?P<type>\w+)-LISTEN:(?P<port>\d+),.*(?P<fork_type>\w+)-LISTEN:(?P<fork_ip>[\d\.]+):(?P<fork_port>\d+)`)
+			matches := re.FindStringSubmatch(line)
+
+			if matches != nil {
+				pid := matches[1]
+				connType := matches[2]
+				port := matches[3]
+				forkType := matches[4]
+				forkIP := matches[5]
+				forkPort := matches[6]
+
+				// 将信息添加到结构体中
+				processes = append(processes, ProcessInfo{
+					PID:      pid,
+					Type:     connType,
+					Port:     port,
+					ForkIP:   forkIP,
+					ForkPort: forkPort,
+					ForkType: forkType,
+				})
+			}
+		}
+	}
+	return processes
+}
+
+func IgnoreRepeated(cacheSocatList, SocatList []ProcessInfo) []ProcessInfo {
+	if len(SocatList) != 0 {
+		var temp []ProcessInfo
+		for _, item := range cacheSocatList {
+			exist := false
+			for _, ig := range SocatList {
+				if item.Type == ig.Type &&
+					item.Port == ig.Port &&
+					item.ForkIP == ig.ForkIP &&
+					item.ForkPort == ig.ForkPort &&
+					item.ForkType == ig.ForkType {
+					exist = true
+				}
+			}
+			if !exist {
+				temp = append(temp, item)
+			}
+		}
+		// fmt.Println(temp)
+		return temp
+	}
+	return cacheSocatList
+}
+
+func RunSocat(SocatList []ProcessInfo) {
+	if len(SocatList) > 0 {
+		for _, item := range SocatList {
+			go func(item ProcessInfo) {
+				command := strings.Join([]string{"socat ", item.Type, "-LISTEN:", item.Port, ",reuseaddr,fork ", item.ForkType, ":", item.ForkIP, ":", item.ForkPort}, "")
+				_, err := RunCommandWithRes(command)
+				if err != nil {
+					CfStatus = "run socat error"
+				}
+			}(item)
+		}
+	}
+}
 
 func FilterString(input string) string {
 	// 使用 ReplaceAll 方法过滤掉 \r、\n 和 \t
@@ -263,6 +350,7 @@ func CheckConfig(ConfigFile string) (conf *Config, err error) {
 	yamlFile, err := os.ReadFile(ConfigFile)
 	if err != nil {
 		if os.IsNotExist(err) {
+			SocatList := make([]ProcessInfo, 0)
 			confYaml = &Config{
 				CFApi:     "https://api.cloudflare.com/client/v4/zones/",
 				Proxy:     false,
@@ -274,6 +362,7 @@ func CheckConfig(ConfigFile string) (conf *Config, err error) {
 				AdminPWD:  "1234567890",
 				ScanTime:  30,
 				HasError:  false,
+				SocatList: SocatList,
 			}
 
 			// 将默认配置写入新文件
@@ -314,7 +403,7 @@ func CheckConfig(ConfigFile string) (conf *Config, err error) {
 func CloudFlareFunc(ipData *IPList, CfRootUrl, CheckUrl, ConfigFile string, config *Config, RecordType string) {
 	// fmt.Println(CheckUrl)
 	recordId, recordIp, resSuccess, err := CloudFlareApi(CheckUrl, "GET", config.Token, []byte(""), true)
-	fmt.Println(config.IP6Addr, config.IPAddr, config.Domains, recordIp, resSuccess, config.HasError, err)
+	// fmt.Println(config.IP6Addr, config.IPAddr, config.Domains, recordIp, resSuccess, config.HasError, err)
 	if err != nil {
 		return
 	}
@@ -515,6 +604,20 @@ func main() {
 			}
 		}
 	}()
+
+	socat_stdout, err := RunCommandWithRes("socat -V | awk '/version/{print $3}'")
+	fmt.Println(socat_stdout)
+	if err == nil && !strings.Contains(socat_stdout, "not") {
+		socat_list, _ := RunCommandWithRes("ps | grep socat | grep -v grep")
+		fmt.Println(socat_list)
+		SocatList := GetSocatList(socat_list)
+		var CacheSocatList []ProcessInfo = confYaml.SocatList
+		if len(SocatList) > 0 {
+			CurrentSocatList := IgnoreRepeated(CacheSocatList, SocatList)
+			RunSocat(CurrentSocatList)
+		}
+	}
+
 	// gin.SetMode(gin.ReleaseMode)
 	gin.SetMode(gin.DebugMode)
 	router := gin.New()
@@ -570,6 +673,42 @@ func main() {
 			"ApiStatus":      CfStatus,
 			"HasError":       confYaml.HasError,
 			"ScanTime":       confYaml.ScanTime,
+		})
+	})
+
+	router.GET("/api/socat_status", func(c *gin.Context) {
+		var (
+			socat_status int
+			SocatList    []ProcessInfo
+		)
+		SocatList = make([]ProcessInfo, 0)
+		socat_stdout, err := RunCommandWithRes("socat -V | awk '/version/{print $3}'")
+		if err != nil {
+			socat_status = 2
+		}
+		if strings.Contains(socat_stdout, "not") {
+			socat_status = 1
+			socat_stdout = ""
+		} else {
+			// fmt.Println(recordIp, success, "up", config)
+			socat_list, _ := RunCommandWithRes("ps | grep socat | grep -v grep")
+			GSocatList := GetSocatList(socat_list)
+			if len(GSocatList) > 0 {
+				SocatList = GSocatList
+			}
+
+			socat_status = 0
+			if strings.Contains(socat_stdout, "\n") {
+				socat_stdout = strings.Split(socat_stdout, "\n")[0]
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":       200,
+			"message":      "success",
+			"SocatStatus":  socat_status,
+			"SocatVersion": socat_stdout,
+			"SocatList":    SocatList,
 		})
 	})
 

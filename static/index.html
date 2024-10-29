@@ -45,6 +45,26 @@
       margin-left: 2rem;
       cursor: pointer;
     }
+    .dark pre code {
+      color: #333
+    }
+    .dark th {
+      color: #eee
+    }
+    .button.button-primary, button.button.red-button {
+      background-color: #f05433;
+      border-color: #f05433;
+      margin-left: 10px;
+    }
+    @media screen and (max-width: 768px) {
+      .auto-width {
+        width: 100%;
+        overflow-x: scroll;
+      }
+      .auto-width table {
+        width: 960px;
+      }
+    }
   </style>
 </head>
 
@@ -102,6 +122,21 @@
   }
   function Counter() {
     return {
+      add_socat: {
+        "Name": "",
+        "PID": "",
+        "Type": "",
+        "Port": "",
+        "ForkIP": "",
+        "ForkPort": "",
+        "ForkType": "",
+      },
+      socat_data: {
+        "SocatList": [],
+        "SocatStatus": 1,
+        "SocatVersion": "",
+        "SocatVersion": "",
+      },
       data: {
         "ApiStatus":"",
         "Domains":"",
@@ -120,16 +155,18 @@
         "status":200
       },
       loading:false,
+      sloading: false,
       passowrd: "",
       set_message: "",
       pow_message: "",
       dark: true,
       mounted() {
-        console.log(`I'm mounted!`)
+        // console.log(`I'm mounted!`)
         if (this.dark) {
           document.getElementsByTagName("body")[0].className="dark"
         }
         this.GetStatusData()
+        this.GetSocatData()
       },
       async putData(){
         let Proxy = "false"
@@ -159,6 +196,21 @@
           this.loading = true
         }
       },
+      async GetSocatData(){
+        this.sloading = false
+        const data = await httpserver("socat_status")
+        // console.log(JSON.stringify(data))
+        if (data.status === 200) {
+          if (data.SocatList.length > 0) {
+            this.socat_data.SocatList = data.SocatList
+          }
+          this.socat_data.SocatStatus = data.SocatStatus
+          if (data.SocatStatus === 0) {
+            this.socat_data.SocatVersion = data.SocatVersion
+          }
+          this.sloading = true
+        }
+      },
       async changePassword(){
         const post_data = {
           "Password": this.passowrd
@@ -180,6 +232,10 @@
         }else{
           document.getElementsByTagName("body")[0].className=""
         }
+      },
+      isIPv4(str) {
+        const ipv4Regex = /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+        return ipv4Regex.test(str);
       },
     }
   }
@@ -279,6 +335,73 @@
         && data.Domains.indexOf('.') != -1
         && data.ScanTime > 10 ">提交</button>
       <button class="button" v-else disabled>提交</button>
+    </div>
+
+    <div class="section docs-section" v-if="sloading">
+      <h6 class="docs-header">Socat设置 V{{socat_data.SocatVersion}}</h6>
+      <p>如果你只有IPv6 必须使用Socat进行端口转发</p>
+      <p v-if="socat_data.SocatStatus != 0">socat没有安装 请手动安装后再试
+        <pre>
+          <code>opkg update
+opkg install socat</code>
+        </pre>
+      </p>
+      <div class="row auto-width">
+        <table class="u-full-width">
+          <thead>
+            <tr>
+              <th width="12%">名称</th>
+              <th width="15%">协议</th>
+              <th width="12%">外部端口</th>
+              <th width="25%">内部IPv4</th>
+              <th width="12%">内部端口</th>
+              <th width="25%"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="socat in socat_data.SocatList" :key="socat.PID">
+                <td><input class="u-full-width" type="text" placeholder="名称" v-model="socat.Name"></td>
+                <td>
+                  <select class="u-full-width" v-model="socat.Type">
+                    <option value="TCP6">TCP6</option>
+                    <option value="UDP6">UDP6</option>
+                  </select>
+                </td>
+                <td><input class="u-full-width" type="text" placeholder="外部端口" v-model="socat.Port"></td>
+                <td><input class="u-full-width" type="text" placeholder="内部IPv4" v-model="socat.ForkIP"></td>
+                <td><input class="u-full-width" type="text" placeholder="内部端口" v-model="socat.ForkPort"></td>
+                <td>
+                  <button class="button-primary">修改</button>
+                  <button class="button red-button">删除</button>
+                </td>
+            </tr>
+            <tr>
+              <td><input class="u-full-width" type="text" placeholder="名称" v-model="add_socat.Name"></td>
+              <td>
+                <select class="u-full-width" v-model="add_socat.Type">
+                  <option value="0">TCP6</option>
+                  <option value="1">UDP6</option>
+                </select>
+              </td>
+              <td><input class="u-full-width" type="text" placeholder="外部端口" v-model="add_socat.Port"></td>
+              <td><input class="u-full-width" type="text" placeholder="内部IPv4" v-model="add_socat.ForkIP"></td>
+              <td><input class="u-full-width" type="text" placeholder="内部端口" v-model="add_socat.ForkPort"></td>
+              <td>
+                <button class="button-primary"
+                  v-if="add_socat.Name.length >= 4 &&
+                  parseInt(add_socat.Type) >= 0 &&
+                  parseInt(add_socat.Type) <= 2 &&
+                  parseInt(add_socat.Port) >= 1024 &&
+                  parseInt(add_socat.Port) <= 65535 &&
+                  isIPv4(add_socat.ForkIP) &&
+                  parseInt(add_socat.ForkPort) >= 1024 &&
+                  parseInt(add_socat.ForkPort) <= 65535">添加</button>
+                  <button class="button" v-else disabled>添加</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="section docs-section">
