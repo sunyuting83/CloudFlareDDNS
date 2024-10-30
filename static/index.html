@@ -340,12 +340,11 @@
     <div class="section docs-section" v-if="sloading">
       <h6 class="docs-header">Socat设置 V{{socat_data.SocatVersion}}</h6>
       <p>如果你只有IPv6 必须使用Socat进行端口转发</p>
-      <p v-if="socat_data.SocatStatus != 0">socat没有安装 请手动安装后再试
-        <pre>
-          <code>opkg update
+      <p v-if="socat_data.SocatStatus != 0">socat没有安装 请手动安装后再试</p>
+      <pre v-if="socat_data.SocatStatus != 0">
+        <code>opkg update
 opkg install socat</code>
-        </pre>
-      </p>
+      </pre>
       <div class="row auto-width">
         <table class="u-full-width">
           <thead>
