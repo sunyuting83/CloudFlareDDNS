@@ -734,9 +734,10 @@ func FilterURL(url string) string {
 }
 
 func main() {
+	Version := "1.0.1"
 	PsVersion = GetPsVersion()
 	CurrentPath, _ := GetCurrentPath()
-	// fmt.Println(CurrentPath)
+	fmt.Println(Version)
 	ConfigFile := strings.Join([]string{CurrentPath, "config.yaml"}, "/")
 	confYaml, err := CheckConfig(ConfigFile)
 	if err != nil {
@@ -817,6 +818,7 @@ func main() {
 			"ApiStatus":      CfStatus,
 			"HasError":       confYaml.HasError,
 			"ScanTime":       confYaml.ScanTime,
+			"Version":        Version,
 		})
 	})
 

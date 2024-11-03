@@ -306,7 +306,7 @@
 <body>
   <div class="container" v-scope="Counter()" @vue:mounted="mounted">
     <div class="section docs-section" v-if="loading">
-      <h6 class="docs-header"><span>接口设置</span><span class="close" @click="light">{{dark? "开灯" : "关灯"}}</span></h6>
+      <h6 class="docs-header"><span>接口设置 {{data.Version}}</span><span class="close" @click="light">{{dark? "开灯" : "关灯"}}</span></h6>
       <p class="red" v-if="set_message.length > 0">提示消息: {{set_message}} 本消息5秒后自动消失</p>
       <div class="row">
         <div class="four columns">
