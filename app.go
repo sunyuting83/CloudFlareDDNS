@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/gzip"
@@ -96,6 +97,14 @@ type FormConfig struct {
 type FormPassword struct {
 	Password string `form:"Password" json:"Password" xml:"Password"  binding:"required"`
 }
+type FormSocat struct {
+	PID      string `form:"PID" json:"PID" xml:"PID"  binding:"required"`
+	Name     string `form:"Name" json:"Name" xml:"Name"  binding:"required"`
+	Type     string `form:"Type" json:"Type" xml:"Type"  binding:"required"`
+	Port     string `form:"Port" json:"Port" xml:"Port"  binding:"required"`
+	ForkIP   string `form:"ForkIP" json:"ForkIP" xml:"ForkIP"  binding:"required"`
+	ForkPort string `form:"ForkPort" json:"ForkPort" xml:"ForkPort"  binding:"required"`
+}
 
 type IPList struct {
 	IPAddr  string
@@ -104,7 +113,7 @@ type IPList struct {
 
 type ProcessInfo struct {
 	Name     string `json:"Name"`
-	PID      string `json:"PID"`
+	PID      int    `json:"PID"`
 	Type     string `json:"Type"`
 	Port     string `json:"Port"`
 	ForkIP   string `json:"ForkIP"`
@@ -112,40 +121,110 @@ type ProcessInfo struct {
 	ForkType string `json:"ForkType"`
 }
 
+type FormDelSocat struct {
+	PID int `json:"PID"`
+}
+
 var CfStatus string = "nothing"
 var CacheUrl string
+var PsVersion bool = false
+
+func GetPsVersion() bool {
+	ps := false
+	command := "ps --help"
+	ps_stdout, err := RunCommandWithRes(command)
+	if err != nil {
+		return false
+	}
+	if strings.Contains(ps_stdout, "BusyBox") {
+		ps = true
+	}
+	return ps
+}
+
+func isValidIPv4(ip string) bool {
+	parsedIP := net.ParseIP(ip)
+	return parsedIP != nil && parsedIP.To4() != nil // 确保是 IPv4 地址
+}
+
+func SocatFuntion(confYaml *Config, socat_manager *GoroutineManager, addNew bool) {
+	socat_stdout, err := RunCommandWithRes("socat -V | awk '/version/{print $3}'")
+	// fmt.Println(socat_stdout)
+	if err == nil && !strings.Contains(socat_stdout, "not") {
+		ps_command := "ps -ef"
+		if PsVersion {
+			ps_command = "ps -w"
+		}
+		psCommand := strings.Join([]string{ps_command, " | grep socat | grep -v grep"}, "")
+		socat_list, _ := RunCommandWithRes(psCommand)
+		// fmt.Println(socat_list)
+		SocatList := GetSocatList(socat_list)
+		// var CacheSocatList []ProcessInfo = confYaml.SocatList
+		if len(SocatList) > 0 {
+			CurrentSocatList := IgnoreRepeated(confYaml.SocatList, SocatList)
+			if len(CurrentSocatList) > 0 {
+				if addNew {
+					socat_manager.AddSocat(CurrentSocatList[0])
+				} else {
+					socat_manager.RunSocat(CurrentSocatList)
+				}
+			}
+		} else {
+			socat_manager.RunSocat(confYaml.SocatList)
+		}
+	}
+}
 
 func GetSocatList(input string) []ProcessInfo {
 	var processes []ProcessInfo
 	if len(input) > 0 {
-		// 使用正则表达式匹配每一行
-		lines := strings.Split(input, "\n")
-		for _, line := range lines {
-			if line == "" {
-				continue
-			}
-
-			// 使用正则表达式提取信息
-			re := regexp.MustCompile(`(?P<pid>\d+)\s+\w+\s+\d+\s+\w+\s+(?P<type>\w+)-LISTEN:(?P<port>\d+),.*(?P<fork_type>\w+)-LISTEN:(?P<fork_ip>[\d\.]+):(?P<fork_port>\d+)`)
-			matches := re.FindStringSubmatch(line)
-
-			if matches != nil {
-				pid := matches[1]
-				connType := matches[2]
-				port := matches[3]
-				forkType := matches[4]
-				forkIP := matches[5]
-				forkPort := matches[6]
-
-				// 将信息添加到结构体中
-				processes = append(processes, ProcessInfo{
-					PID:      pid,
-					Type:     connType,
-					Port:     port,
-					ForkIP:   forkIP,
-					ForkPort: forkPort,
-					ForkType: forkType,
-				})
+		if strings.Contains(input, ",reuseaddr,fork") {
+			re := regexp.MustCompile(`\s{2,}`)
+			// 使用正则表达式匹配每一行
+			lines := strings.Split(input, "\n")
+			for _, line := range lines {
+				if line == "" {
+					continue
+				}
+				line = re.ReplaceAllString(line, " ")
+				lineSplit := strings.Split(line, " ")
+				if PsVersion {
+					connType := strings.Split(lineSplit[5], "-")[0]
+					port := strings.Split(strings.Split(lineSplit[5], ":")[1], ",")[0]
+					forkType := "TCP4"
+					if connType == "TCP6" {
+						forkType = "TCP4"
+					} else {
+						forkType = "UDP4"
+					}
+					forkIP := strings.Split(lineSplit[6], ":")[1]
+					forkPort := strings.Split(lineSplit[6], ":")[2]
+					processes = append(processes, ProcessInfo{
+						Type:     connType,
+						Port:     port,
+						ForkIP:   forkIP,
+						ForkPort: forkPort,
+						ForkType: forkType,
+					})
+				} else {
+					connType := strings.Split(lineSplit[8], "-")[0]
+					port := strings.Split(strings.Split(lineSplit[8], ":")[1], ",")[0]
+					forkType := "TCP4"
+					if connType == "TCP6" {
+						forkType = "TCP4"
+					} else {
+						forkType = "UDP4"
+					}
+					forkIP := strings.Split(lineSplit[9], ":")[1]
+					forkPort := strings.Split(lineSplit[9], ":")[2]
+					processes = append(processes, ProcessInfo{
+						Type:     connType,
+						Port:     port,
+						ForkIP:   forkIP,
+						ForkPort: forkPort,
+						ForkType: forkType,
+					})
+				}
 			}
 		}
 	}
@@ -176,18 +255,93 @@ func IgnoreRepeated(cacheSocatList, SocatList []ProcessInfo) []ProcessInfo {
 	return cacheSocatList
 }
 
-func RunSocat(SocatList []ProcessInfo) {
-	if len(SocatList) > 0 {
-		for _, item := range SocatList {
-			go func(item ProcessInfo) {
-				command := strings.Join([]string{"socat ", item.Type, "-LISTEN:", item.Port, ",reuseaddr,fork ", item.ForkType, ":", item.ForkIP, ":", item.ForkPort}, "")
-				_, err := RunCommandWithRes(command)
-				if err != nil {
-					CfStatus = "run socat error"
-				}
-			}(item)
-		}
+// GoroutineManager 管理正在运行的 goroutines
+type GoroutineManager struct {
+	mu               sync.Mutex
+	wg               sync.WaitGroup
+	activeGoroutines map[int]chan struct{} // 用于控制每个 goroutine 的停止信号
+}
+
+// NewGoroutineManager 创建新的 GoroutineManager 实例
+func NewGoroutineManager() *GoroutineManager {
+	return &GoroutineManager{
+		activeGoroutines: make(map[int]chan struct{}),
 	}
+}
+
+// RunSocat 启动 socat 命令并管理 goroutines
+func (gm *GoroutineManager) RunSocat(socatList []ProcessInfo) {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	for _, item := range socatList {
+		gm.AddSocat(item)
+	}
+}
+
+// AddSocat 添加新的 socat 任务
+func (gm *GoroutineManager) AddSocat(item ProcessInfo) {
+	stopChan := make(chan struct{})
+	gm.activeGoroutines[item.PID] = stopChan // 存储当前 goroutine 的停止信号通道
+
+	gm.wg.Add(1) // 增加 WaitGroup 计数器
+
+	go func(item ProcessInfo, stopChan chan struct{}) {
+		defer gm.wg.Done() // 完成时减少计数器
+
+		command := strings.Join([]string{"socat ", item.Type, "-LISTEN:", item.Port, ",reuseaddr,fork ", item.ForkType, ":", item.ForkIP, ":", item.ForkPort}, "")
+		// fmt.Println("Running command:", command)
+
+		// 启动命令并监控停止信号
+		cmd := exec.Command("bash", "-c", command)
+		err := cmd.Start()
+		if err != nil {
+			fmt.Println("Error starting socat:", err)
+			return
+		}
+
+		// 等待停止信号或命令完成
+		select {
+		case <-stopChan:
+			// fmt.Println("Stopping socat for ID:", item.PID)
+			cmd.Process.Kill() // 停止进程
+		case err := <-waitForCommand(cmd):
+			if err != nil {
+				fmt.Println("socat command exited with error:", err)
+			}
+		}
+	}(item, stopChan)
+}
+
+// StopGoroutine 停止指定 ID 的 goroutine
+func (gm *GoroutineManager) StopGoroutine(id int) {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	if stopChan, exists := gm.activeGoroutines[id]; exists {
+		close(stopChan)                 // 发送停止信号
+		delete(gm.activeGoroutines, id) // 删除记录
+		fmt.Println("Stopped goroutine with ID:", id)
+	} else {
+		fmt.Println("No active goroutine with ID:", id)
+	}
+}
+
+// WaitForCompletion 等待所有 goroutines 完成
+func (gm *GoroutineManager) WaitForCompletion() {
+	gm.wg.Wait()
+}
+
+// waitForCommand 等待命令完成并返回错误（如果有）
+func waitForCommand(cmd *exec.Cmd) <-chan error {
+	ch := make(chan error)
+
+	go func() {
+		err := cmd.Wait()
+		ch <- err
+	}()
+
+	return ch
 }
 
 func FilterString(input string) string {
@@ -580,6 +734,7 @@ func FilterURL(url string) string {
 }
 
 func main() {
+	PsVersion = GetPsVersion()
 	CurrentPath, _ := GetCurrentPath()
 	// fmt.Println(CurrentPath)
 	ConfigFile := strings.Join([]string{CurrentPath, "config.yaml"}, "/")
@@ -604,22 +759,11 @@ func main() {
 			}
 		}
 	}()
+	socat_manager := NewGoroutineManager()
+	SocatFuntion(confYaml, socat_manager, false)
 
-	socat_stdout, err := RunCommandWithRes("socat -V | awk '/version/{print $3}'")
-	fmt.Println(socat_stdout)
-	if err == nil && !strings.Contains(socat_stdout, "not") {
-		socat_list, _ := RunCommandWithRes("ps | grep socat | grep -v grep")
-		fmt.Println(socat_list)
-		SocatList := GetSocatList(socat_list)
-		var CacheSocatList []ProcessInfo = confYaml.SocatList
-		if len(SocatList) > 0 {
-			CurrentSocatList := IgnoreRepeated(CacheSocatList, SocatList)
-			RunSocat(CurrentSocatList)
-		}
-	}
-
-	// gin.SetMode(gin.ReleaseMode)
-	gin.SetMode(gin.DebugMode)
+	gin.SetMode(gin.ReleaseMode)
+	// gin.SetMode(gin.DebugMode)
 	router := gin.New()
 
 	accounts := gin.Accounts{
@@ -691,9 +835,30 @@ func main() {
 			socat_stdout = ""
 		} else {
 			// fmt.Println(recordIp, success, "up", config)
-			socat_list, _ := RunCommandWithRes("ps | grep socat | grep -v grep")
+			ps_command := "ps -ef"
+			if PsVersion {
+				ps_command = "ps -w"
+			}
+			psCommand := strings.Join([]string{ps_command, " | grep socat | grep -v grep"}, "")
+			// fmt.Println(psCommand)
+			socat_list, _ := RunCommandWithRes(psCommand)
+			// fmt.Println(socat_list)
 			GSocatList := GetSocatList(socat_list)
+			// fmt.Println(GSocatList)
 			if len(GSocatList) > 0 {
+				for index, item := range GSocatList {
+					for _, ig := range confYaml.SocatList {
+						if item.Type == ig.Type &&
+							item.Port == ig.Port &&
+							item.ForkIP == ig.ForkIP &&
+							item.ForkPort == ig.ForkPort &&
+							item.ForkType == ig.ForkType {
+							GSocatList[index].Name = ig.Name
+							GSocatList[index].PID = ig.PID
+						}
+					}
+				}
+				// fmt.Println(GSocatList)
 				SocatList = GSocatList
 			}
 
@@ -709,6 +874,239 @@ func main() {
 			"SocatStatus":  socat_status,
 			"SocatVersion": socat_stdout,
 			"SocatList":    SocatList,
+		})
+	})
+
+	router.POST("/api/add_socat", func(c *gin.Context) {
+		var form FormSocat
+		if err := c.ShouldBind(&form); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  1,
+				"message": err.Error(),
+			})
+			return
+		}
+		Port, _ := strconv.Atoi(form.Port)
+		if Port > 65535 && Port < 20 {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  500,
+				"message": "The port must be equal to or greater than 20 and less than or equal to 65535",
+			})
+			return
+		}
+		ForkPort, _ := strconv.Atoi(form.ForkPort)
+		if ForkPort > 65535 && ForkPort < 20 {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  500,
+				"message": "The ForkPort must be equal to or greater than 20 and less than or equal to 65535",
+			})
+			return
+		}
+		if !isValidIPv4(form.ForkIP) {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  500,
+				"message": "Illegal IP address",
+			})
+			return
+		}
+		if form.Type != "TCP6" && form.Type != "UDP6" {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  500,
+				"message": "Illegal Type",
+			})
+			return
+		}
+		if len(form.Name) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  500,
+				"message": "Illegal Name",
+			})
+			return
+		}
+		var nonAlphanumericRegex = regexp.MustCompile(`[^a-zA-Z0-9_ ]+`)
+		new_Name := nonAlphanumericRegex.ReplaceAllString(form.Name, "")
+		if len(new_Name) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  500,
+				"message": "Illegal Name",
+			})
+			return
+		}
+		TypePort := strings.Join([]string{form.Type, form.Port}, ":")
+		if len(confYaml.SocatList) != 0 {
+			for _, socat := range confYaml.SocatList {
+				hasTypePort := strings.Join([]string{socat.Type, socat.Port}, ":")
+				if socat.Name == new_Name {
+					c.JSON(http.StatusOK, gin.H{
+						"status":  500,
+						"message": "Name already exists",
+					})
+					return
+				}
+				if hasTypePort == TypePort {
+					c.JSON(http.StatusOK, gin.H{
+						"status":  500,
+						"message": "The port is occupied.",
+					})
+					return
+				}
+			}
+		}
+		ForkType := "TCP4"
+		if form.Type == "TCP6" {
+			ForkType = "TCP4"
+		} else {
+			ForkType = "UDP4"
+		}
+		PID := 0
+		SocatLen := len(confYaml.SocatList)
+		if SocatLen != 0 {
+			PID = confYaml.SocatList[SocatLen-1].PID + 1
+		}
+		newSocat := ProcessInfo{
+			PID:      PID,
+			Name:     new_Name,
+			Type:     form.Type,
+			Port:     form.Port,
+			ForkIP:   form.ForkIP,
+			ForkPort: form.ForkPort,
+			ForkType: ForkType,
+		}
+		confYaml.SocatList = append(confYaml.SocatList, newSocat)
+		configData, _ := yaml.Marshal(&confYaml)
+		err := os.WriteFile(ConfigFile, configData, 0644)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status":  500,
+				"message": "Error writing config file",
+			})
+			return
+		}
+		SocatFuntion(confYaml, socat_manager, true)
+		c.JSON(http.StatusOK, gin.H{
+			"status":  200,
+			"message": "success",
+		})
+	})
+
+	router.DELETE("/api/del_socat", func(c *gin.Context) {
+		var form FormDelSocat
+		if err := c.ShouldBind(&form); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  1,
+				"message": err.Error(),
+			})
+			return
+		}
+
+		if len(confYaml.SocatList) != 0 {
+			for i, socat := range confYaml.SocatList {
+				if form.PID == socat.PID {
+					confYaml.SocatList = append(confYaml.SocatList[:i], confYaml.SocatList[i+1:]...)
+					configData, _ := yaml.Marshal(&confYaml)
+					err := os.WriteFile(ConfigFile, configData, 0644)
+					if err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{
+							"status":  500,
+							"message": "Error writing config file",
+						})
+						return
+					}
+					socat_manager.StopGoroutine(form.PID)
+					c.JSON(http.StatusOK, gin.H{
+						"status":  200,
+						"message": "deletion",
+					})
+					return
+				}
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  500,
+			"message": "Data not available",
+		})
+	})
+
+	router.PUT("/api/change_socat", func(c *gin.Context) {
+		var form FormSocat
+		if err := c.ShouldBind(&form); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  1,
+				"message": err.Error(),
+			})
+			return
+		}
+		PID, _ := strconv.Atoi(form.PID)
+
+		var nonAlphanumericRegex = regexp.MustCompile(`[^a-zA-Z0-9_ ]+`)
+		new_Name := nonAlphanumericRegex.ReplaceAllString(form.Name, "")
+		if len(new_Name) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  500,
+				"message": "Illegal Name",
+			})
+			return
+		}
+
+		if len(confYaml.SocatList) != 0 {
+			TypePort := strings.Join([]string{form.Type, form.Port}, ":")
+			for i, socat := range confYaml.SocatList {
+				if PID == socat.PID {
+					hasTypePort := strings.Join([]string{socat.Type, socat.Port}, ":")
+					if TypePort == hasTypePort && form.ForkIP == socat.ForkIP && form.ForkPort == socat.ForkPort {
+						c.JSON(http.StatusOK, gin.H{
+							"status":  500,
+							"message": "No modification required",
+						})
+						return
+					}
+
+					ForkType := "TCP4"
+					if form.Type == "TCP6" {
+						ForkType = "TCP4"
+					} else {
+						ForkType = "UDP4"
+					}
+
+					// confYaml.SocatList[i].PID = PID
+					// confYaml.SocatList[i].Name = socat.Name
+					// confYaml.SocatList[i].Type = socat.Type
+					// confYaml.SocatList[i].Port = socat.Port
+					// confYaml.SocatList[i].ForkIP = socat.ForkIP
+					// confYaml.SocatList[i].ForkPort = socat.ForkPort
+					// confYaml.SocatList[i].ForkType = ForkType
+					confYaml.SocatList[i] = ProcessInfo{
+						PID:      PID,
+						Name:     form.Name,
+						Type:     form.Type,
+						Port:     form.Port,
+						ForkIP:   form.ForkIP,
+						ForkPort: form.ForkPort,
+						ForkType: ForkType,
+					}
+					// fmt.Println(confYaml.SocatList[i])
+					configData, _ := yaml.Marshal(&confYaml)
+					err := os.WriteFile(ConfigFile, configData, 0644)
+					if err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{
+							"status":  500,
+							"message": "Error writing config file",
+						})
+						return
+					}
+					socat_manager.StopGoroutine(PID)
+					socat_manager.AddSocat(confYaml.SocatList[i])
+					c.JSON(http.StatusOK, gin.H{
+						"status":  200,
+						"message": "Modified successfully",
+					})
+					return
+				}
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  500,
+			"message": "Data not available",
 		})
 	})
 
@@ -835,13 +1233,15 @@ func main() {
 		Addr:    ":3060",
 		Handler: router,
 	}
-	fmt.Printf("listen port %s\n", srv.Addr)
+	// fmt.Printf("listen port %s\n", srv.Addr)
 	go func() {
 		// 服务连接
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
+
+	socat_manager.WaitForCompletion()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
