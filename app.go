@@ -18,9 +18,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
-	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v2"
 )
@@ -127,20 +127,6 @@ type FormDelSocat struct {
 
 var CfStatus string = "nothing"
 var CacheUrl string
-var PsVersion bool = false
-
-func GetPsVersion() bool {
-	ps := false
-	command := "ps --help"
-	ps_stdout, err := RunCommandWithRes(command)
-	if err != nil {
-		return false
-	}
-	if strings.Contains(ps_stdout, "BusyBox") {
-		ps = true
-	}
-	return ps
-}
 
 func isValidIPv4(ip string) bool {
 	parsedIP := net.ParseIP(ip)
@@ -151,14 +137,14 @@ func SocatFuntion(confYaml *Config, socat_manager *GoroutineManager, addNew bool
 	socat_stdout, err := RunCommandWithRes("socat -V | awk '/version/{print $3}'")
 	// fmt.Println(socat_stdout)
 	if err == nil && !strings.Contains(socat_stdout, "not") {
-		ps_command := "ps -ef"
-		if PsVersion {
-			ps_command = "ps -w"
-		}
-		psCommand := strings.Join([]string{ps_command, " | grep socat | grep -v grep"}, "")
-		socat_list, _ := RunCommandWithRes(psCommand)
+		// ps_command := "ps -ef"
+		// if PsVersion {
+		// 	ps_command = "ps -w"
+		// }
+		// psCommand := strings.Join([]string{ps_command, " | grep socat | grep -v grep"}, "")
+		// socat_list, _ := RunCommandWithRes(psCommand)
 		// fmt.Println(socat_list)
-		SocatList := GetSocatList(socat_list)
+		SocatList := GetSocatList()
 		// var CacheSocatList []ProcessInfo = confYaml.SocatList
 		if len(SocatList) > 0 {
 			CurrentSocatList := IgnoreRepeated(confYaml.SocatList, SocatList)
@@ -175,48 +161,34 @@ func SocatFuntion(confYaml *Config, socat_manager *GoroutineManager, addNew bool
 	}
 }
 
-func GetSocatList(input string) []ProcessInfo {
+func GetSocatList() []ProcessInfo {
 	var processes []ProcessInfo
-	if len(input) > 0 {
-		if strings.Contains(input, ",reuseaddr,fork") {
-			re := regexp.MustCompile(`\s{2,}`)
-			// 使用正则表达式匹配每一行
-			lines := strings.Split(input, "\n")
-			for _, line := range lines {
-				if line == "" {
-					continue
-				}
-				line = re.ReplaceAllString(line, " ")
-				lineSplit := strings.Split(line, " ")
-				if PsVersion {
-					connType := strings.Split(lineSplit[5], "-")[0]
-					port := strings.Split(strings.Split(lineSplit[5], ":")[1], ",")[0]
+	var validId = regexp.MustCompile("^[0-9]+$")
+	infoList, err := os.ReadDir("/proc")
+	if err != nil {
+		return make([]ProcessInfo, 0)
+	}
+	for _, info := range infoList {
+		if info.IsDir() && validId.MatchString(info.Name()) {
+			// fmt.Println(info.Name())
+			b, err := os.ReadFile(strings.Join([]string{"/proc/", info.Name(), "/cmdline"}, ""))
+			socatStr := string(b)
+			if err != nil {
+				continue
+			}
+			if len(b) != 0 {
+				if strings.Contains(socatStr, "socat") {
+					lineSplit := strings.Split(socatStr, "\u0000")
+					connType := strings.Split(lineSplit[1], "-")[0]
+					port := strings.Split(strings.Split(lineSplit[1], ":")[1], ",")[0]
 					forkType := "TCP4"
 					if connType == "TCP6" {
 						forkType = "TCP4"
 					} else {
 						forkType = "UDP4"
 					}
-					forkIP := strings.Split(lineSplit[6], ":")[1]
-					forkPort := strings.Split(lineSplit[6], ":")[2]
-					processes = append(processes, ProcessInfo{
-						Type:     connType,
-						Port:     port,
-						ForkIP:   forkIP,
-						ForkPort: forkPort,
-						ForkType: forkType,
-					})
-				} else {
-					connType := strings.Split(lineSplit[8], "-")[0]
-					port := strings.Split(strings.Split(lineSplit[8], ":")[1], ",")[0]
-					forkType := "TCP4"
-					if connType == "TCP6" {
-						forkType = "TCP4"
-					} else {
-						forkType = "UDP4"
-					}
-					forkIP := strings.Split(lineSplit[9], ":")[1]
-					forkPort := strings.Split(lineSplit[9], ":")[2]
+					forkIP := strings.Split(lineSplit[2], ":")[1]
+					forkPort := strings.Split(lineSplit[2], ":")[2]
 					processes = append(processes, ProcessInfo{
 						Type:     connType,
 						Port:     port,
@@ -289,11 +261,14 @@ func (gm *GoroutineManager) AddSocat(item ProcessInfo) {
 	go func(item ProcessInfo, stopChan chan struct{}) {
 		defer gm.wg.Done() // 完成时减少计数器
 
-		command := strings.Join([]string{"socat ", item.Type, "-LISTEN:", item.Port, ",reuseaddr,fork ", item.ForkType, ":", item.ForkIP, ":", item.ForkPort}, "")
+		// command := strings.Join([]string{"socat ", item.Type, "-LISTEN:", item.Port, ",reuseaddr,fork ", item.ForkType, ":", item.ForkIP, ":", item.ForkPort}, "")
 		// fmt.Println("Running command:", command)
-
+		LISTEN := strings.Join([]string{item.Type, "-LISTEN:", item.Port, ",reuseaddr,fork"}, "")
+		Fork := strings.Join([]string{item.ForkType, ":", item.ForkIP, ":", item.ForkPort}, "")
 		// 启动命令并监控停止信号
-		cmd := exec.Command("bash", "-c", command)
+		cmd := exec.Command("socat", LISTEN, Fork)
+		// fmt.Println(cmd)
+		// cmd := exec.Command(command)
 		err := cmd.Start()
 		if err != nil {
 			fmt.Println("Error starting socat:", err)
@@ -735,7 +710,21 @@ func FilterURL(url string) string {
 
 func main() {
 	Version := "1.0.1"
-	PsVersion = GetPsVersion()
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGCHLD)
+
+	go func() {
+		for range c {
+			// 捕获 SIGCHLD 信号并回收子进程
+			for {
+				pid, err := syscall.Wait4(-1, nil, syscall.WNOHANG, nil)
+				if pid == 0 || err != nil {
+					break
+				}
+			}
+		}
+	}()
+	// PsVersion = GetPsVersion()
 	CurrentPath, _ := GetCurrentPath()
 	fmt.Println(Version)
 	ConfigFile := strings.Join([]string{CurrentPath, "config.yaml"}, "/")
@@ -771,7 +760,7 @@ func main() {
 		"admin": confYaml.AdminPWD,
 	}
 
-	router.Use(gzip.Gzip(gzip.DefaultCompression))
+	// router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(gin.BasicAuth(accounts))
 	router.Delims("{%", "%}")
 
@@ -837,15 +826,15 @@ func main() {
 			socat_stdout = ""
 		} else {
 			// fmt.Println(recordIp, success, "up", config)
-			ps_command := "ps -ef"
-			if PsVersion {
-				ps_command = "ps -w"
-			}
-			psCommand := strings.Join([]string{ps_command, " | grep socat | grep -v grep"}, "")
-			// fmt.Println(psCommand)
-			socat_list, _ := RunCommandWithRes(psCommand)
+			// ps_command := "ps -ef"
+			// if PsVersion {
+			// 	ps_command = "ps -w"
+			// }
+			// psCommand := strings.Join([]string{ps_command, " | grep socat | grep -v grep"}, "")
+			// // fmt.Println(psCommand)
+			// socat_list, _ := RunCommandWithRes(psCommand)
 			// fmt.Println(socat_list)
-			GSocatList := GetSocatList(socat_list)
+			GSocatList := GetSocatList()
 			// fmt.Println(GSocatList)
 			if len(GSocatList) > 0 {
 				for index, item := range GSocatList {
