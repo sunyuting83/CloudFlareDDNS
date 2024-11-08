@@ -4,6 +4,8 @@
 只支持linux系统
 前端使用[轻量vue](https://github.com/vuejs/petite-vue)和[轻量css](https://github.com/dhg/Skeleton)编写
 
+主程序3M大小 在op上占用内存18.67M 内存和存储空间紧张的请谨慎用
+
 ### 工作原理
 - 通过ip addr命令获取所选定的网卡的ipv4或ipv6的ip地址，注意，这里获取的不一定是公网ip 只是从网卡信息里获取到的ip地址。
 我使用openwrt 所以选择pppoe-wan 名称可能不同 根据实际情况选取
@@ -26,7 +28,7 @@ socat的作用是把ipv6的入站流量转发到局域网内的其他设备
 
 ![](doc/ddns.jpg)
 - 填入相应的ZoneID Token 域名
-- IP类型更具实际情况选择 选项有 ipv4 ipv6 ipv4&ipv6
+- IP类型根据实际情况选择 选项有 ipv4 ipv6 ipv4&ipv6
 - - 如果没有ipv4公网ip 就选择ipv6即可
 - - 如果有ipv4公网ip 同时有希望ipv6也可以访问 就选择 ipv4&ipv6
 - 网卡选择可正确获取ipv6的网卡
