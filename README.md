@@ -62,7 +62,7 @@ socat的作用是把ipv6的入站流量转发到局域网内的其他设备
 ![](doc/cloudflare_04.jpg)
 
 - 3.点击copy 并保存好API Token 因为只显示这一次
-    也可以使用下面的curl进行测试，被红色遮挡的就是token
+- - 也可以使用下面的curl进行测试，被红色遮挡的就是token
 ![](doc/cloudflare_05.jpg)
 
 - 4.返回Cloudflare后台首页 点击域名进入域名管理 在右侧找到下图Zone ID 点击 Click to copy
