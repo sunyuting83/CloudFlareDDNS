@@ -3,7 +3,6 @@ module CloudFlareDDNS
 go 1.21.2
 
 require (
-	github.com/gin-contrib/gzip v1.0.1
 	github.com/gin-gonic/gin v1.10.0
 	gopkg.in/yaml.v2 v2.4.0
 )
