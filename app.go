@@ -336,6 +336,7 @@ func GetIpAddr(InterFace string) (ip_list *IPList) {
 	command := strings.Join([]string{"ip -4 addr show dev", InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
 	ip, err := RunCommandWithRes(command)
 	if err != nil || len(ip) == 0 {
+		// https://api-ipv4.ip.sb/ip
 		ipData, err := getData("4.ipw.cn", "GET", []byte(""), "")
 		if err == nil {
 			ipv4 = string(ipData)
@@ -347,6 +348,7 @@ func GetIpAddr(InterFace string) (ip_list *IPList) {
 	v6command := strings.Join([]string{"ip -6 addr show dev", InterFace, `| grep "scope global" | awk '{print $2}' | awk -F "/" '{print $1}'`}, " ")
 	v6ip, err := RunCommandWithRes(v6command)
 	if err != nil || len(v6ip) == 0 {
+		// https://api-ipv6.ip.sb/ip
 		ip6Data, err := getData("https://6.ipw.cn/", "GET", []byte(""), "")
 		if err == nil {
 			ipv6 = string(ip6Data)

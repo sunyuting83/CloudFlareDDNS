@@ -310,50 +310,50 @@
       <p class="red" v-if="set_message.length > 0">提示消息: {{set_message}} 本消息5秒后自动消失</p>
       <div class="row">
         <div class="four columns">
-          <label for="exampleEmailInput">更新状态</label>
+          <label>更新状态</label>
           <span class="docs-span">{{data.ApiStatus}}</span>
           <button class="button-primary" @click="upStatus" >更新状态</button>
         </div>
         <div class="four columns">
-          <label for="exampleEmailInput">任务状态</label>
+          <label>任务状态</label>
           <span class="docs-span">{{data.TaskStatus === 'running' ? "运行中" : "已停止"}}</span>
         </div>
         <div class="four columns">
-          <label for="exampleEmailInput">是否出错</label>
+          <label>是否出错</label>
           <span class="docs-span">{{data.HasError ? "发生错误": "一切正常"}}</span>
         </div>
       </div>
       <div class="row">
         <div class="six columns">
-          <label for="exampleEmailInput">IPv4地址</label>
+          <label>IPv4地址</label>
           <span class="docs-span">{{data.IPv4}}</span>
         </div>
         <div class="six columns">
-          <label for="exampleEmailInput">IPv6地址</label>
+          <label>IPv6地址</label>
           <span class="docs-span">{{data.IPv6}}</span>
         </div>
       </div>
       <div class="row">
         <div class="columns">
-          <label for="exampleEmailInput">ZoneID</label>
+          <label>ZoneID</label>
           <input class="u-full-width" type="text" placeholder="ZoneID" v-model=data.ZoneID />
         </div>
       </div>
       <div class="row">
         <div class="columns">
-          <label for="exampleEmailInput">Token</label>
+          <label>Token</label>
           <input class="u-full-width" type="text" placeholder="Token" v-model=data.Token />
         </div>
       </div>
       <div class="row">
         <div class="columns">
-          <label for="exampleEmailInput">域名</label>
+          <label>域名</label>
           <input class="u-full-width" type="text" placeholder="Domains" v-model=data.Domains />
         </div>
       </div>
       <div class="row">
         <div class="columns">
-          <label for="exampleRecipientInput">IP类型</label>
+          <label>IP类型</label>
           <select class="u-full-width" v-model="data.Type">
             <option value="0">IPv4</option>
             <option value="1">IPv6</option>
@@ -363,7 +363,8 @@
       </div>
       <div class="row">
         <div class="columns">
-          <label for="exampleRecipientInput">网卡</label>
+          <label class="ten columns">网卡 </label>
+          <label class="two columns">切换接口获取</label>
           <select class="u-full-width" v-model="data.InterFace">
             <option v-for="interface in data.InterFacesList" :value=interface>{{interface}}</option>
           </select>
@@ -371,14 +372,21 @@
       </div>
       <div class="row">
         <div class="columns">
-          <label for="exampleEmailInput">更新频率(秒)</label>
+          <label class="ten columns">接口 </label>
+          <label class="two columns">切换网卡获取</label>
+          <input class="u-full-width" type="text" placeholder="Domains" v-model=data.Domains />
+        </div>
+      </div>
+      <div class="row">
+        <div class="columns">
+          <label>更新频率(秒)</label>
           <input class="u-full-width" type="number" v-model=data.ScanTime />
         </div>
       </div>
       <div class="row">
         <div class="columns">
-          <label for="exampleEmailInput">云代理</label>
-          <label class="example-send-yourself-copy">
+          <label>云代理</label>
+          <label>
             <input type="checkbox" :value=data.Proxy  v-model=data.Proxy />
             <span class="label-body">云代理</span>
           </label>
@@ -476,7 +484,7 @@ opkg install socat</code>
       <p class="red" v-if="pow_message.length > 0">{{pow_message}}</p>
       <div class="row">
         <div class="columns">
-          <label for="exampleEmailInput">新密码</label>
+          <label>新密码</label>
           <input class="u-full-width" type="text" placeholder="新密码" v-model=passowrd>
         </div>
       </div>
