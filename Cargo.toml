@@ -1,0 +1,37 @@
+[package]
+name = "rust-ddns-socat"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+# Web 框架
+axum = "0.7"
+# 序列化/反序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+# 网络请求
+reqwest = { version = "0.11", features = ["json"] }
+# 系统信号处理与路径管理
+tokio-util = "0.7"
+sysinfo = { version = "0.30", default-features = false }
+regex = "1"
+# 其他工具
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tower-http = { version = "0.5", features = ["fs", "trace"] }
+pnet_datalink = "0.34"
+base64 = "0.21"
+openssl-sys = { version = "0.9", features = ["vendored"] }
+rust-embed = "8.3.0"
+mime_guess = "2.0.4"
+
+[profile.release]
+opt-level = "z"      # 优化代码体积
+lto = true           # 启用链接时优化 (Link Time Optimization)
+codegen-units = 1    # 减少并行编译单元，进一步提高优化效果
+panic = "abort"      # 发生 panic 时直接退出，减少异常处理代码
+strip = true         # 自动从二进制文件中剔除调试符号 (类似 Go 的 -s -w)

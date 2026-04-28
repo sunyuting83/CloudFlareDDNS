@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>CloudFlare DDNS</title>
+  <meta name="description" content="">
+  <meta name="author" content="">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link rel="stylesheet" href="/static/normalize.css">
+  <link rel="stylesheet" href="/static/skeleton.css">
+  <style>
+    .docs-header {
+      text-transform: uppercase;
+      font-size: 1.4rem;
+      letter-spacing: .2rem;
+      font-weight: 600;
+    }
+    .docs-section {
+      border-top: 1px solid #eee;
+      padding: 4rem 0;
+      margin-bottom: 0;
+    }
+    .docs-span {
+      height: 38px;
+      padding: 6px 10px 6px 0px;
+      margin-bottom: 1.5rem;
+      line-height: 38px;
+    }
+    .red {color:brown}
+    .container {padding-bottom: 60px;}
+    .dark {
+      background: #000000;
+      color:#eee
+    }
+    .dark .u-full-width {
+      color: #000
+    }
+    .dark button[disabled] {
+      background: #eee;
+      color: #000
+    }
+    .close {
+      margin-left: 2rem;
+      cursor: pointer;
+    }
+    .dark pre code {
+      color: #333
+    }
+    .dark th {
+      color: #eee
+    }
+    .button.button-primary, button.button.red-button {
+      background-color: #f05433;
+      border-color: #f05433;
+      margin-left: 10px;
+      color: #fff;
+    }
+    @media screen and (max-width: 768px) {
+      .auto-width {
+        width: 100%;
+        overflow-x: scroll;
+      }
+      .auto-width table {
+        width: 960px;
+      }
+    }
+  </style>
+</head>
+
+<script type="module">
+  import { createApp } from '/static/petite-vue.es.js'
+  const Rooturi = window.location.origin + '/api/'
+  function httpserver(url = '', data = {}, type = 'GET'){
+    type = type.toUpperCase()
+    // 此处规定get请求的参数使用时放在data中，如同post请求
+    if (type === 'GET') {
+      let dataStr = ''
+      Object.keys(data).forEach(key => {
+        dataStr += key + '=' + data[key] + '&'
+      })
+
+      if (dataStr !== '') {
+        dataStr = dataStr.substr(0, dataStr.lastIndexOf('&'))
+        url = url + '?' + dataStr
+      }
+    }
+
+    let requestConfig = {
+      // fetch默认不会带cookie，需要添加配置项credentials允许携带cookie
+      method: type,
+      headers: {
+        'Content-type':'application/json;charset=UTF-8'
+      }
+    }
+
+    if (type === 'POST' || type === 'PUT' || type === 'DELETE') {
+      Object.defineProperty(requestConfig, 'body', {
+        value: JSON.stringify(data)
+      })
+    }
+    const get_url = Rooturi + url
+    return new Promise((resolve) => {
+      fetch(get_url, requestConfig)
+        .then(res => {
+          if(res.ok) {
+            resolve (res.json())
+          }else {
+            resolve({
+              status: 500,
+              message: res.status
+            })
+          }
+        })
+        .catch((err) => {
+          resolve({
+            status: 500,
+            message: err.message
+          })
+        })
+    })
+  }
+  function Counter() {
+    return {
+      add_socat: {
+        "Name": "",
+        "Pid": 0,
+        "ConnType": "",
+        "Port": 0,
+        "ForkIp": "",
+        "ForkPort": 0,
+        "ForkType": "",
+      },
+      socat_data: {
+        "SocatList": [],
+        "SocatStatus": 1,
+        "SocatVersion": "",
+        "SocatVersion": "",
+      },
+      data: {
+        "ApiStatus":false,
+        "Domains":"",
+        "HasError":false,
+        "IPv4":"",
+        "IPv6":"",
+        "InterFace":"",
+        "InterFacesList":[],
+        "Proxy":false,
+        "ScanTime":0,
+        "TaskStatus":false,
+        "Token":"",
+        "Type":0,
+        "ZoneID":"",
+        "message":"",
+        "status":200
+      },
+      loading:false,
+      sloading: false,
+      passowrd: "",
+      set_message: "",
+      pow_message: "",
+      dark: false,
+      socat_message: "",
+      mounted() {
+        // console.log(`I'm mounted!`)
+        const hours = new Date().getHours()
+        if (hours >= 20 || hours < 6) {
+          this.dark = true
+        }
+        if (this.dark) {
+          document.getElementsByTagName("body")[0].className="dark"
+        }
+        this.GetStatusData()
+        this.GetSocatData()
+      },
+      showAndHideMessage(type, message, timeout = 5000){
+        if (type == "socat") {
+          this.socat_message = message
+          setTimeout(() => {
+            this.socat_message = ""
+          }, timeout)
+        }else {
+          this.set_message = message
+          setTimeout(() => {
+            this.set_message = ""
+          }, timeout)
+        }
+      },
+      async putData(){
+        const post_data = {
+          "ZoneID": this.data.ZoneID,
+          "Token": this.data.Token,
+          "RecordType": parseInt(this.data.Type),
+          "Proxy": this.data.Proxy,
+          "Interfaces": this.data.InterFace,
+          "Domains": this.data.Domains,
+          "ScanTime": this.data.ScanTime,
+        }
+        const put_data = await httpserver("setconfig", post_data, "PUT")
+        if (put_data.status === 200) {
+          this.GetStatusData()
+        }
+        this.showAndHideMessage("set", put_data.message)
+      },
+      async GetStatusData(){
+        this.loading = false
+        this.data = await httpserver("status")
+        this.data.Type = String(this.data.Type)
+        if (this.data.status === 200) {
+          this.loading = true
+        }
+      },
+      async GetSocatData(){
+        this.sloading = false
+        const data = await httpserver("socat_status")
+        // console.log(JSON.stringify(data))
+        if (data.status === 200) {
+          
+          this.socat_data.SocatList = data.SocatList
+          
+          this.socat_data.SocatStatus = data.SocatStatus
+          if (data.SocatStatus === 0) {
+            this.socat_data.SocatVersion = data.SocatVersion
+          }
+          this.sloading = true
+        }
+      },
+      async changePassword(){
+        const post_data = {
+          "Password": this.passowrd
+        }
+        if (this.passowrd.length >= 8) {
+          const re_password = await httpserver("setpassword", post_data, "PUT")
+          this.pow_message = re_password.message
+        }else{
+          this.pow_message = "密码必须大于8位"
+        }
+      },
+      upStatus(){
+        this.GetStatusData()
+      },
+      light(){
+        this.dark = !this.dark
+        if (this.dark) {
+          document.getElementsByTagName("body")[0].className="dark"
+        }else{
+          document.getElementsByTagName("body")[0].className=""
+        }
+      },
+      isIPv4(str) {
+        const ipv4Regex = /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+        return ipv4Regex.test(str);
+      },
+      async AddSocat(){
+        // console.log(this.add_socat)
+        this.add_socat.Port = parseInt(this.add_socat.Port)
+        this.add_socat.ForkPort = parseInt(this.add_socat.ForkPort)
+        const socat = await httpserver("add_socat", this.add_socat, "POST")
+        if (socat.status === 200) {
+          this.GetSocatData()
+        }
+        this.showAndHideMessage("socat", socat.message)
+      },
+      async DeleteSocat(id, name){
+        const delete_socat = await httpserver("del_socat", {"Pid": id, "Name": name}, "DELETE")
+        if (delete_socat.status === 200) {
+          this.GetSocatData()
+        }
+        this.showAndHideMessage("socat", delete_socat.message)
+      },
+      async ChangeSocat(id){
+        const _this_data = this.socat_data.SocatList
+        // console.log(_this_data)
+        const change_data = _this_data.filter((el) => {return el.Pid === id})
+        // console.log(change_data)
+        if (change_data.length != 0) {
+          const data = {
+            "Name": change_data[0].Name,
+            "Pid": change_data[0].Pid,
+            "ConnType": change_data[0].ConnType,
+            "Port": parseInt(change_data[0].Port),
+            "ForkIp": change_data[0].ForkIp,
+            "ForkPort": parseInt(change_data[0].ForkPort),
+            "ForkType": change_data[0].ForkType,
+          }
+          const change_socat = await httpserver("change_socat", data, "PUT")
+          if (change_socat.status === 200) {
+            this.GetSocatData()
+          }
+          this.showAndHideMessage("socat", change_socat.message)
+        }else{
+          this.showAndHideMessage("socat", "数据不存在")
+        }
+      },
+    }
+  }
+  createApp({
+    Counter
+  })
+  .mount()
+</script>
+
+<body>
+  <div class="container" v-scope="Counter()" @vue:mounted="mounted">
+    <div class="section docs-section" v-if="loading">
+      <h6 class="docs-header"><span>接口设置 {{data.Version}}</span><span class="close" @click="light">{{dark? "开灯" : "关灯"}}</span></h6>
+      <p class="red" v-if="set_message.length > 0">提示消息: {{set_message}} 本消息5秒后自动消失</p>
+      <div class="row">
+        <div class="four columns">
+          <label>更新状态</label>
+          <!-- <span class="docs-span">{{data.ApiStatus}}</span> -->
+          <button class="button-primary" @click="upStatus" >更新状态</button>
+        </div>
+        <div class="four columns">
+          <label>任务状态</label>
+          <span class="docs-span">{{data.TaskStatus === true ? "运行中" : "已停止"}}</span>
+        </div>
+        <div class="four columns">
+          <label>是否出错</label>
+          <span class="docs-span">{{data.HasError ? "发生错误": "一切正常"}}</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="six columns">
+          <label>IPv4地址</label>
+          <span class="docs-span">{{data.IPv4}}</span>
+        </div>
+        <div class="six columns">
+          <label>IPv6地址</label>
+          <span class="docs-span">{{data.IPv6}}</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="columns">
+          <label>ZoneID</label>
+          <input class="u-full-width" type="text" placeholder="ZoneID" v-model=data.ZoneID />
+        </div>
+      </div>
+      <div class="row">
+        <div class="columns">
+          <label>Token</label>
+          <input class="u-full-width" type="text" placeholder="Token" v-model=data.Token />
+        </div>
+      </div>
+      <div class="row">
+        <div class="columns">
+          <label>域名</label>
+          <input class="u-full-width" type="text" placeholder="Domains" v-model=data.Domains />
+        </div>
+      </div>
+      <div class="row">
+        <div class="columns">
+          <label>IP类型</label>
+          <select class="u-full-width" v-model="data.Type">
+            <option value="0">IPv4</option>
+            <option value="1">IPv6</option>
+            <option value="2">IPv4&IPv6</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="columns">
+          <label class="ten columns">网卡 </label>
+          <label class="two columns">切换接口获取</label>
+          <select class="u-full-width" v-model="data.InterFace">
+            <option v-for="interface in data.InterFacesList" :value=interface>{{interface}}</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="columns">
+          <label class="ten columns">接口 </label>
+          <label class="two columns">切换网卡获取</label>
+          <input class="u-full-width" type="text" placeholder="Domains" v-model=data.Domains />
+        </div>
+      </div>
+      <div class="row">
+        <div class="columns">
+          <label>更新频率(秒)</label>
+          <input class="u-full-width" type="number" v-model=data.ScanTime />
+        </div>
+      </div>
+      <div class="row">
+        <div class="columns">
+          <label>云代理</label>
+          <label>
+            <input type="checkbox" :value=data.Proxy  v-model=data.Proxy />
+            <span class="label-body">云代理</span>
+          </label>
+        </div>
+      </div>
+      <button class="button-primary" @click="putData"
+        v-if="data.ZoneID.length > 30 
+        && data.Token.length > 30
+        && data.Type.length > 0
+        && data.InterFace.length > 0
+        && data.Domains.length > 0
+        && data.Domains.indexOf('.') != -1
+        && data.ScanTime > 10 ">提交</button>
+      <button class="button" v-else disabled>提交</button>
+    </div>
+
+    <div class="section docs-section" v-if="sloading">
+      <h6 class="docs-header">Socat端口转发 V{{socat_data.SocatVersion}}</h6>
+      <p>如果你只有IPv6 请使用Socat进行端口转发 执行删除操作后请等待提示消息消失后再删除其他配置</p>
+      <p v-if="socat_data.SocatStatus != 0">socat没有安装 请手动安装后再试</p>
+      <pre v-if="socat_data.SocatStatus != 0">
+        <code>opkg update
+opkg install socat</code>
+      </pre>
+      <p class="red" v-if="socat_message.length > 0">提示消息: {{socat_message}} 本消息5秒后自动消失</p>
+      <div class="row auto-width">
+        <table class="u-full-width">
+          <thead>
+            <tr>
+              <th width="12%">名称</th>
+              <th width="15%">协议</th>
+              <th width="12%">外部端口</th>
+              <th width="25%">内部IPv4</th>
+              <th width="12%">内部端口</th>
+              <th width="25%"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="socat in socat_data.SocatList" :key="socat.Pid">
+                <td><input class="u-full-width" type="text" placeholder="名称" v-model="socat.Name"></td>
+                <td>
+                  <select class="u-full-width" v-model="socat.ConnType">
+                    <option value="TCP6">TCP6</option>
+                    <option value="UDP6">UDP6</option>
+                  </select>
+                </td>
+                <td><input class="u-full-width" type="text" placeholder="外部端口" v-model="socat.Port"></td>
+                <td><input class="u-full-width" type="text" placeholder="内部IPv4" v-model="socat.ForkIp"></td>
+                <td><input class="u-full-width" type="text" placeholder="内部端口" v-model="socat.ForkPort"></td>
+                <td>
+                  <button class="button-primary"
+                  v-if="socat.Name.length >= 4 &&
+                  socat.ConnType == 'TCP6' ||
+                  socat.ConnType == 'UDP6' &&
+                  parseInt(socat.Port) >= 20 &&
+                  parseInt(socat.Port) <= 65535 &&
+                  isIPv4(socat.ForkIp) &&
+                  parseInt(socat.ForkPort) >= 20 &&
+                  parseInt(socat.ForkPort) <= 65535" @click="ChangeSocat(socat.Pid)">修改</button>
+                  <button class="button" v-else disabled>修改</button>
+                  <button class="button red-button" @click="DeleteSocat(socat.Pid, socat.Name)">删除</button>
+                </td>
+            </tr>
+            <tr>
+              <td><input class="u-full-width" type="text" placeholder="名称" v-model="add_socat.Name"></td>
+              <td>
+                <select class="u-full-width" v-model="add_socat.ConnType">
+                  <option value="TCP6">TCP6</option>
+                  <option value="UDP6">UDP6</option>
+                </select>
+              </td>
+              <td><input class="u-full-width" type="text" placeholder="外部端口" v-model="add_socat.Port"></td>
+              <td><input class="u-full-width" type="text" placeholder="内部IPv4" v-model="add_socat.ForkIp"></td>
+              <td><input class="u-full-width" type="text" placeholder="内部端口" v-model="add_socat.ForkPort"></td>
+              <td>
+                <button class="button-primary"
+                  v-if="add_socat.Name.length >= 4 &&
+                  (add_socat.ConnType == 'TCP6' ||
+                  add_socat.ConnType == 'UDP6') &&
+                  parseInt(add_socat.Port) >= 20 &&
+                  parseInt(add_socat.Port) <= 65535 &&
+                  isIPv4(add_socat.ForkIp) &&
+                  parseInt(add_socat.ForkPort) >= 20 &&
+                  parseInt(add_socat.ForkPort) <= 65535" @click="AddSocat">添加</button>
+                  <button class="button" v-else disabled>添加</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section docs-section">
+      <h6 class="docs-header">密码修改</h6>
+      <p class="red" v-if="pow_message.length > 0">{{pow_message}}</p>
+      <div class="row">
+        <div class="columns">
+          <label>新密码</label>
+          <input class="u-full-width" type="text" placeholder="新密码" v-model=passowrd>
+        </div>
+      </div>
+      <button class="button-primary" @click="changePassword"
+        v-if="passowrd.length >= 8">修改</button>
+      <button class="button" v-else disabled>修改</button>
+    </div>
+  </div>
+</body>
+</html>
