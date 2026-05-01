@@ -129,6 +129,10 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse
         "HasError": conf.has_error,
         "ScanTime": conf.scan_time,
         "Version": "1.0.1-Rust",
+        // --- 新增字段 ---
+        "UseApi": conf.use_api,
+        "IpSourcesV4": &conf.ip_sources_v4,
+        "IpSourcesV6": &conf.ip_sources_v6,
     }))
 }
 
@@ -151,16 +155,14 @@ async fn set_password(
 
 async fn set_config(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<BasicConfigForm>, // 使用专用 Form
+    Json(req): Json<BasicConfigForm>, 
 ) -> impl IntoResponse {
-    // 严谨校验示例
     if req.token.is_empty() || req.zone_id.is_empty() {
         return Json(json!({"status": 1, "message": "Token 或 ZoneID 缺失"}));
     }
 
     let mut conf = state.config.lock().await;
     
-    // 局部赋值，绝对不会触碰 socat_list
     conf.zone_id = req.zone_id;
     conf.token = req.token;
     conf.domains = req.domains;
@@ -168,10 +170,13 @@ async fn set_config(
     conf.interface = req.interface;
     conf.proxy = req.proxy;
     conf.record_type = req.record_type;
+    conf.use_api = req.use_api; // 接入新的布尔值逻辑
     conf.has_error = false;
+    conf.ip_sources_v4 = req.ip_sources_v4;
+    conf.ip_sources_v6 = req.ip_sources_v6;
 
     match conf.save_to_file().await {
-        Ok(_) => Json(json!({"status": 200, "message": "Config saved"})),
+        Ok(_) => Json(json!({"status": 200, "message": "配置已保存"})),
         Err(e) => Json(json!({"status": 500, "message": e.to_string()})),
     }
 }

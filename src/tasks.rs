@@ -36,6 +36,7 @@ pub async fn start_ddns_task(config: Arc<Mutex<Config>>) {
 }
 
 async fn run_cycle(config: Arc<Mutex<Config>>, is_first_run: bool) {
+    // 1. 在函数开始时获取锁。注意：这里用 mut 因为后面更新 IP 需要修改配置
     let mut conf = config.lock().await;
 
     // 基础校验：配置不全则跳过
@@ -43,8 +44,11 @@ async fn run_cycle(config: Arc<Mutex<Config>>, is_first_run: bool) {
         return;
     }
 
-    // 获取当前网卡的真实 IP
-    let ip_data = get_ip_addr(&conf.interface).await;
+    // --- 关键修正点 ---
+    // 你已经拿到 conf 了，直接把 &*conf 传给 get_ip_addr 即可
+    // 不需要再从 state 获取，也不需要重新开锁（否则会造成死锁！）
+    let ip_data = get_ip_addr(&*conf).await;
+    
     let cf = CloudflareClient::new(&conf.token);
 
     // 根据 RecordType 决定处理 IPv4 还是 IPv6
@@ -52,7 +56,6 @@ async fn run_cycle(config: Arc<Mutex<Config>>, is_first_run: bool) {
         0 | 1 | 2 => {
             // --- 处理 IPv4 (A 记录) ---
             if (conf.record_type == 0 || conf.record_type == 2) && !ip_data.ip_addr.is_empty() {
-                // 逻辑：(IP 变了) 或者 (程序刚启动)
                 if conf.ip_addr != ip_data.ip_addr || is_first_run {
                     if is_first_run {
                         println!("程序启动/网络重置，执行 IPv4 强制校验...");
@@ -60,6 +63,7 @@ async fn run_cycle(config: Arc<Mutex<Config>>, is_first_run: bool) {
                         println!("IPv4 发生变化: {} -> {}，同步云端...", conf.ip_addr, ip_data.ip_addr);
                     }
                     
+                    // 这里注意：&mut *conf 是解引用后再取可变借用
                     if let Err(e) = cf.update_ddns(&mut *conf, "A", &ip_data.ip_addr).await {
                         handle_task_error(&mut *conf, e).await;
                     }
@@ -67,8 +71,8 @@ async fn run_cycle(config: Arc<Mutex<Config>>, is_first_run: bool) {
             }
 
             // --- 处理 IPv6 (AAAA 记录) ---
+            // 检查 !conf.has_error 是为了防止上面 IPv4 出错后下面继续跑
             if !conf.has_error && (conf.record_type == 1 || conf.record_type == 2) && !ip_data.ip6_addr.is_empty() {
-                // 逻辑：(IP 变了) 或者 (程序刚启动)
                 if conf.ip6_addr != ip_data.ip6_addr || is_first_run {
                     if is_first_run {
                         println!("程序启动/网络重置，执行 IPv6 强制校验...");

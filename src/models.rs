@@ -17,6 +17,9 @@ pub struct Config {
     pub has_error: bool,
     pub cf_api: String,
     pub socat_list: Vec<ProcessInfo>,
+    pub use_api: bool,
+    pub ip_sources_v4: Vec<String>,
+    pub ip_sources_v6: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)] // 加上 Debug
@@ -49,6 +52,17 @@ impl Default for Config {
             scan_time: 30,
             has_error: false,
             socat_list: vec![],
+            use_api: false,
+            ip_sources_v4: vec![
+                "https://ip4.now/".to_string(),
+                "http://api.ipify.org".to_string(),
+                "http://v4.ident.me".to_string(),
+            ],
+            ip_sources_v6: vec![
+                "https://ip6.now/".to_string(),
+                "http://api6.ipify.org".to_string(),
+                "http://v6.ident.me".to_string(),
+            ],
         }
     }
 }
@@ -112,12 +126,14 @@ pub struct BasicConfigForm {
     pub token: String,
     pub record_type: i32,
     pub proxy: bool,
-    
+    pub use_api: bool,
     #[serde(rename = "Interfaces")] 
     pub interface: String,
     
     pub domains: String,
     pub scan_time: u64,
+    pub ip_sources_v4: Vec<String>,
+    pub ip_sources_v6: Vec<String>,
 }
 
 // --- 2. 密码修改申请表 ---
